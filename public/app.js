@@ -47,6 +47,7 @@ const els = {
   profileName: document.querySelector("#profileName"),
   moods: document.querySelector("#moods"),
   playlistJson: document.querySelector("#playlistJson"),
+  resolveNetease: document.querySelector("#resolveNetease"),
   saveProfile: document.querySelector("#saveProfile")
 };
 
@@ -97,6 +98,7 @@ function setupEvents() {
   });
   els.voiceBtn.addEventListener("click", () => playDjIntro({ resumeMusic: !els.player.paused }));
   document.querySelector(".brand").addEventListener("dblclick", () => els.profileDialog.showModal());
+  els.resolveNetease.addEventListener("click", resolveNeteasePlaylist);
   els.saveProfile.addEventListener("click", saveProfile);
   els.player.addEventListener("timeupdate", updateProgress);
   document.querySelector(".volume input")?.addEventListener("input", (event) => {
@@ -402,6 +404,30 @@ async function saveProfile() {
   state.profile = await api("/api/taste", { method: "PUT", body: next });
   await refreshPlan();
   els.profileDialog.close();
+}
+
+async function resolveNeteasePlaylist() {
+  const tracks = normalizePlaylistInput(JSON.parse(els.playlistJson.value));
+  els.resolveNetease.disabled = true;
+  els.resolveNetease.textContent = "Resolving...";
+  try {
+    const result = await api("/api/netease/resolve", { method: "POST", body: { tracks } });
+    els.playlistJson.value = JSON.stringify(
+      result.tracks.map((track) => ({
+        name: track.title ?? track.name,
+        artist: track.artist,
+        source: track.source,
+        sourceId: track.sourceId,
+        cover: track.cover,
+        externalUrl: track.externalUrl
+      })),
+      null,
+      2
+    );
+  } finally {
+    els.resolveNetease.disabled = false;
+    els.resolveNetease.textContent = "\u89e3\u6790\u7f51\u6613\u4e91";
+  }
 }
 
 function normalizePlaylistInput(items) {

@@ -1,3 +1,5 @@
+import { generateJson } from "./llm";
+import { getNeteaseLyric, getNeteaseUrl, resolveNeteaseTracks, searchNetease } from "./netease";
 import { chooseTrack, fallbackDjReply, pickRoutine } from "./persona";
 import { getNow, getProfile, saveNow, saveProfile } from "./state";
 import type { DjReply, Env, MoodContext, TasteProfile, Track } from "./types";
@@ -44,12 +46,12 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
   if (request.method === "GET" && url.pathname === "/api/now") {
     const now = await getNow(env);
     if (now) return json(now);
-    return json(await computeReply(env, "按现在的时间安排一首歌"));
+    return json(await computeReply(env, "Plan a song for the current time."));
   }
 
   if (request.method === "POST" && url.pathname === "/api/chat") {
     const body = (await request.json()) as { message?: string; context?: MoodContext };
-    const reply = await computeReply(env, body.message ?? "现在适合听什么", body.context ?? {});
+    const reply = await computeReply(env, body.message ?? "What should I listen to now?", body.context ?? {});
     return json(reply);
   }
 
@@ -69,6 +71,23 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
     return speak(env, url.searchParams.get("text") ?? "");
   }
 
+  if (request.method === "GET" && url.pathname === "/api/netease/search") {
+    return json(await searchNetease(env, url.searchParams.get("q") ?? ""));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/netease/resolve") {
+    const body = (await request.json()) as { tracks?: Array<Partial<Track> & { name?: string }> };
+    return json({ tracks: await resolveNeteaseTracks(env, body.tracks ?? []) });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/netease/url") {
+    return json(await getNeteaseUrl(env, url.searchParams.get("id") ?? ""));
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/netease/lyric") {
+    return json(await getNeteaseLyric(env, url.searchParams.get("id") ?? ""));
+  }
+
   return json({ error: "Not found" }, 404);
 }
 
@@ -79,30 +98,23 @@ async function computeReply(env: Env, message: string, context: MoodContext = {}
   const track = chooseTrack(profile, routine, hash(message), inferredContext);
   const fallback = fallbackDjReply(profile, routine, track, inferredContext);
 
-  if (!env.AI) {
-    await saveNow(env, fallback);
-    return fallback;
-  }
-
   const prompt = [
-    `你是私人音乐 DJ ${env.DJ_NAME}，输出严格 JSON。`,
-    "字段必须是 say, reason, segue。不要输出 markdown。",
-    `用户资料: ${JSON.stringify({ name: profile.name, language: profile.language, favoriteMoods: profile.favoriteMoods })}`,
-    `当前时段: ${JSON.stringify(routine)}`,
-    `天气和心情: ${JSON.stringify(inferredContext)}`,
-    `候选歌曲: ${track ? JSON.stringify(track) : "无"}`,
-    `用户输入: ${message}`,
-    "风格: 亲近、简短、像电台 DJ，不超过 80 个中文字符。"
+    `You are private music DJ ${env.DJ_NAME}. Return strict JSON only.`,
+    "Required fields: say, reason, segue. No markdown.",
+    `User profile: ${JSON.stringify({ name: profile.name, language: profile.language, favoriteMoods: profile.favoriteMoods })}`,
+    `Routine: ${JSON.stringify(routine)}`,
+    `Weather and mood: ${JSON.stringify(inferredContext)}`,
+    `Candidate track: ${track ? JSON.stringify(track) : "none"}`,
+    `User message: ${message}`,
+    "Style: warm radio DJ, concise, Chinese preferred when user writes Chinese, under 100 Chinese characters."
   ].join("\n");
 
   try {
-    const aiResult = await env.AI.run(env.AI_MODEL, {
-      messages: [
-        { role: "system", content: "You are a concise private radio DJ. Return JSON only." },
-        { role: "user", content: prompt }
-      ]
-    });
-    const text = String((aiResult as { response?: string }).response ?? "");
+    const text = await generateJson(env, [
+      { role: "system", content: "You are a concise private radio DJ. Return JSON only." },
+      { role: "user", content: prompt }
+    ]);
+    if (!text) throw new Error("No LLM provider configured.");
     const parsed = JSON.parse(text.replace(/^```json|```$/g, "").trim()) as Partial<DjReply>;
     const reply = { ...fallback, ...parsed, play: track, context: inferredContext };
     await saveNow(env, reply);
@@ -187,10 +199,10 @@ function contextFromUrl(url: URL): MoodContext {
 }
 
 function inferMood(message: string): string | undefined {
-  if (/累|困|烦|emo|低落|焦虑|难受/.test(message)) return "松弛";
-  if (/工作|专注|写|代码|学习|内容/.test(message)) return "专注";
-  if (/醒|通勤|早|精神|运动/.test(message)) return "清醒";
-  if (/浪漫|晚上|氛围|微醺/.test(message)) return "夜晚";
+  if (/tired|anxious|sad|rain|calm|relax|\u7d2f|\u56f0|\u70e6|\u4f4e\u843d|\u7126\u8651|\u96e8|\u677e\u5f1b/.test(message)) return "\u677e\u5f1b";
+  if (/work|focus|code|study|\u5de5\u4f5c|\u4e13\u6ce8|\u4ee3\u7801|\u5b66\u4e60|\u5185\u5bb9/.test(message)) return "\u4e13\u6ce8";
+  if (/morning|awake|commute|sport|\u9192|\u901a\u52e4|\u65e9|\u7cbe\u795e|\u8fd0\u52a8/.test(message)) return "\u6e05\u9192";
+  if (/night|romantic|vibe|\u591c|\u6d6a\u6f2b|\u665a\u4e0a|\u6c1b\u56f4/.test(message)) return "\u591c\u665a";
   return undefined;
 }
 

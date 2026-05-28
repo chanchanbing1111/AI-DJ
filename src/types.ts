@@ -5,6 +5,11 @@ export interface Env {
   DJ_NAME: string;
   AI_MODEL: string;
   TTS_MODEL: string;
+  NETEASE_API_BASE?: string;
+  NETEASE_COOKIE?: string;
+  LLM_API_KEY?: string;
+  LLM_BASE_URL?: string;
+  LLM_MODEL?: string;
 }
 
 export interface Track {

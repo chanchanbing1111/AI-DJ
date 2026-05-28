@@ -1,74 +1,40 @@
-# AI DJ 私人电台
+# AI DJ
 
-一个部署在 Cloudflare Workers 上的私人音乐 DJ 电台雏形。它把“用户口味资料 + 天气 + 今日心情 + 时段例程 + 私人歌单 + AI DJ 文案 + TTS 播报”组合成一个黑底点阵风格的 PWA 电台。
+私人 AI DJ 电台，部署在 Cloudflare Workers。当前版本包含：
 
-## 当前架构
+- 黑底点阵风格 PWA 前端
+- Cloudflare Workers API
+- D1 保存口味资料、播放状态和播放记录
+- 天气 + 心情 + 时段选歌
+- DJ 播报卡片，音乐铺底时自动压低音量
+- Workers AI fallback
+- OpenAI-compatible 大模型适配
+- NeteaseCloudMusicApi-compatible 网易云适配
 
-- `public/`: 静态 PWA，包含点阵时钟、播放器控制条、DJ 聊天流、今日节目单和口味资料编辑。
-- `src/worker.ts`: Cloudflare Worker API。
-- `src/persona.ts`: 默认口味、时段规则和选曲 fallback。
-- `src/state.ts`: D1 状态读写。
-- `migrations/`: D1 数据库迁移。
+线上地址：
 
-Cloudflare 资源：
-
-- Workers Static Assets: 托管前端。
-- D1: 保存口味资料、当前播放、播放历史。
-- Workers AI: 生成 DJ 串场文案和 TTS 音频。
-- Cron Triggers: 在固定时段预生成当前节目。
-- Browser Geolocation + Open-Meteo: 前端获取本地天气，并把天气状态传给 DJ API 参与选歌。
+```text
+https://ai-dj.chanchanbing1111.workers.dev
+```
 
 ## 本地开发
 
 ```bash
 npm install
 npm run db:migrate:local
-npm run dev
-```
-
-打开 Wrangler 输出的本地地址即可。
-
-本地纯预览，不连接远端 Workers AI：
-
-```bash
 npm run dev:local
 ```
 
-`dev:local` 会使用后端 fallback DJ 文案；部署后或登录 Cloudflare 后，Workers AI 才会生成更自然的串场和 TTS。
-
-## 部署到 Cloudflare
-
-1. 登录 Cloudflare：
-
-```bash
-npx wrangler login
-```
-
-2. 创建 D1 数据库：
-
-```bash
-npx wrangler d1 create ai_dj_db
-```
-
-把输出里的 `database_id` 填进 `wrangler.jsonc`。
-
-3. 应用远端迁移：
+## Cloudflare 部署
 
 ```bash
 npm run db:migrate
-```
-
-4. 发布：
-
-```bash
 npm run deploy
 ```
 
 ## 歌单格式
 
-双击左上角 `Claudio` 可以打开口味资料。`url` 需要是浏览器可播放的音频直链，后续可以替换成 R2 私有曲库签名 URL、网易云解析服务或你自己的音乐 API。
-
-第一版可以先用最简单的结构化歌单，只写歌名和歌手：
+第一版可以直接导入最简单的结构：
 
 ```json
 [
@@ -83,35 +49,74 @@ npm run deploy
 ]
 ```
 
-这种歌单可以参与天气、心情和时段编排，也能生成 DJ 播报。因为没有 `url`，它暂时不会在站内播放音乐；后续接网易云 API 后，可以用 `name + artist` 去搜索并解析 `sourceId`、封面、歌词和尝试获取播放地址。
+双击页面左上角 `Claudio` 打开 Taste File，把 JSON 粘进去。点 `解析网易云` 会调用：
 
-如果已经有可播放音频地址，可以用完整结构：
-
-```json
-[
-  {
-    "id": "song-001",
-    "title": "Song Name",
-    "artist": "Artist",
-    "url": "https://example.com/song.mp3",
-    "cover": "https://example.com/cover.jpg",
-    "mood": ["清醒", "专注", "雨天"],
-    "energy": 6,
-    "source": "private"
-  }
-]
+```text
+POST /api/netease/resolve
 ```
 
-## DJ 播报
+它会用 `name + artist` 搜索网易云，补齐：
 
-点击播放时，音乐会先起一个短前奏，然后 Claudio 贴着音乐做介绍，并在播报卡片里显示 Speaking 状态、波形和逐句文稿。播报时音乐会自动压低，结束后淡回正常音量；如果音乐已经在播放，再点播报按钮会做一次同样的电台串场。
+- `source`
+- `sourceId`
+- `cover`
+- `externalUrl`
 
-本地 `dev:local` 模式没有远端 Workers AI TTS，会自动退回浏览器内置语音。部署到 Cloudflare 并启用 Workers AI 后，会优先使用 `/api/tts` 返回的语音音频。
+注意：网易云音频能不能站内播放，取决于版权、登录态、地区、会员和 API 返回结果。当前策略是：先解析元数据，能拿到播放 URL 就播放，拿不到就保留为 metadata-only。
 
-## 下一步建议
+## 网易云 API
 
-1. 把音频上传到 Cloudflare R2，并为 `/api/music/:id` 增加签名播放地址。
-2. 加 Durable Object + WebSocket，让多设备同步当前播放状态。
-3. 接入真实音乐搜索提供商，只保存元数据和你有权播放的音频地址。
-4. 加每天/每周的偏好总结，让 DJ 学会跳过你常切掉的歌。
-5. 把天气、心情和跳过记录写回 D1，形成每天自动变化的私人节目单。
+本项目按 NeteaseCloudMusicApi 兼容服务调用。你需要先部署或准备一个网易云 API 服务，然后设置：
+
+```bash
+npx wrangler secret put NETEASE_COOKIE
+```
+
+并在 `wrangler.jsonc` 里配置：
+
+```jsonc
+"NETEASE_API_BASE": "https://你的-netease-api.example.com"
+```
+
+已提供接口：
+
+```text
+GET  /api/netease/search?q=关键词
+POST /api/netease/resolve
+GET  /api/netease/url?id=网易云歌曲ID
+GET  /api/netease/lyric?id=网易云歌曲ID
+```
+
+`NETEASE_COOKIE` 可选，但很多歌曲 URL 和会员/私人歌单能力需要登录 Cookie。
+
+## 大模型 API
+
+默认会使用 Cloudflare Workers AI。若配置了 `LLM_API_KEY`，会优先走 OpenAI-compatible Chat Completions：
+
+```bash
+npx wrangler secret put LLM_API_KEY
+```
+
+`wrangler.jsonc` 中可改：
+
+```jsonc
+"LLM_BASE_URL": "https://api.openai.com/v1",
+"LLM_MODEL": "gpt-4o-mini"
+```
+
+也可以换成 DeepSeek、通义、火山等兼容 OpenAI `/chat/completions` 的服务：
+
+```jsonc
+"LLM_BASE_URL": "https://api.deepseek.com/v1",
+"LLM_MODEL": "deepseek-chat"
+```
+
+## 语音合成
+
+当前 `/api/tts` 使用 Cloudflare Workers AI：
+
+```jsonc
+"TTS_MODEL": "@cf/deepgram/aura-1"
+```
+
+本地 `dev:local` 没有远端 TTS 时，前端会自动退回浏览器内置语音。
