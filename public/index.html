@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#09090d" />
+    <title>Claudio</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <main class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="avatar"></div>
+          <span>Claudio</span>
+        </div>
+        <div class="toggles" aria-label="theme">
+          <button class="pill ghost">LOGIN</button>
+          <button class="pill active">DARK</button>
+          <button class="pill ghost">LIGHT</button>
+        </div>
+      </header>
+
+      <section class="clock-panel">
+        <div id="clock" class="dot-clock">00:00</div>
+        <div id="weekday" class="weekday">Thursday</div>
+        <div id="dateLine" class="date-line">28 MAY 2026</div>
+        <div class="on-air"><span></span> ON AIR</div>
+      </section>
+
+      <section class="player-strip">
+        <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <div>
+          <strong id="trackTitle">Loading</strong>
+          <span id="trackMeta">PLAYING</span>
+        </div>
+        <div class="transport">
+          <button id="prevBtn" class="round" title="上一首">◀</button>
+          <button id="playBtn" class="round" title="播放/暂停">Ⅱ</button>
+          <button id="nextBtn" class="round" title="换一首">▶</button>
+          <button id="voiceBtn" class="round" title="DJ 播报">●</button>
+          <button id="favBtn" class="chip" title="喜欢">FAV</button>
+        </div>
+        <label class="volume">VOL <input type="range" min="0" max="1" step="0.01" value="0.72" /></label>
+        <audio id="player" crossorigin="anonymous"></audio>
+      </section>
+
+      <div class="progress"><span id="progressBar"></span></div>
+
+      <section class="queue-bar">
+        <span>QUEUE</span>
+        <span id="queueCount">0 TRACKS</span>
+      </section>
+
+      <section class="station">
+        <div class="station-head">
+          <div><span class="live-dot"></span> Claudio</div>
+          <strong>LIVE</strong>
+        </div>
+
+        <div class="ambient">
+          <div id="weatherLine">Detecting weather...</div>
+          <div class="mood-row">
+            <button data-mood="清醒">清醒</button>
+            <button data-mood="专注">专注</button>
+            <button data-mood="松弛">松弛</button>
+            <button data-mood="夜晚">夜晚</button>
+          </div>
+        </div>
+
+        <section id="broadcastCard" class="broadcast-card">
+          <div class="broadcast-top">
+            <div class="brand mini"><div class="avatar"></div><span>Claudio</span></div>
+            <span id="speakTimer">0:00</span>
+          </div>
+          <div id="speakState" class="speaking-dot"><span></span> Ready</div>
+          <div class="spectrum" aria-hidden="true"></div>
+          <div class="broadcast-sheet">
+            <h2 id="broadcastTitle">Monday Night Exhale</h2>
+            <p id="broadcastMeta">If — Bread</p>
+            <div class="mini-progress"><button id="broadcastPlay" type="button">Ⅱ</button><span></span><em id="broadcastDuration">0:00 / 0:00</em></div>
+            <div id="transcript" class="transcript"></div>
+            <div class="wave-line" aria-hidden="true"></div>
+          </div>
+        </section>
+
+        <div id="chat" class="chat"></div>
+
+        <aside class="schedule">
+          <div class="schedule-title">TODAY LIST</div>
+          <div id="plan"></div>
+        </aside>
+      </section>
+
+      <form id="chatForm" class="composer">
+        <input id="message" name="message" autocomplete="off" placeholder="Say something to the DJ..." />
+        <button id="micBtn" type="button" class="round">◉</button>
+        <button type="submit" class="send">↑</button>
+      </form>
+
+      <dialog id="profileDialog">
+        <form method="dialog" class="profile-panel">
+          <h2>Taste File</h2>
+          <label>昵称 <input id="profileName" /></label>
+          <label>常用情绪 <input id="moods" placeholder="清醒, 松弛, 专注" /></label>
+          <label>歌单 JSON <textarea id="playlistJson" spellcheck="false"></textarea></label>
+          <menu>
+            <button value="cancel" type="submit">关闭</button>
+            <button id="saveProfile" value="save" type="button">保存</button>
+          </menu>
+        </form>
+      </dialog>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
