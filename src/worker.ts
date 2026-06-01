@@ -3,6 +3,8 @@ import {
   getNeteaseLyric,
   getNeteaseMe,
   getNeteasePlaylistTracks,
+  getNeteaseRecommendedSongs,
+  getNeteaseSimilarSongs,
   getNeteaseUrl,
   getNeteaseUserPlaylists,
   resolveNeteaseTracks,
@@ -106,6 +108,14 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
 
   if (request.method === "GET" && url.pathname === "/api/netease/lyric") {
     return json(await getNeteaseLyric(env, url.searchParams.get("id") ?? ""));
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/netease/similar") {
+    return json({ tracks: await getNeteaseSimilarSongs(env, url.searchParams.get("id") ?? "") });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/netease/recommend/songs") {
+    return json({ tracks: await getNeteaseRecommendedSongs(env) });
   }
 
   return json({ error: "Not found" }, 404);

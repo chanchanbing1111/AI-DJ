@@ -38,6 +38,10 @@ app.get("/netease/url", asyncRoute(async (request) => callNetease("song_url_v1",
 app.get("/netease/lyric", asyncRoute(async (request) => callNetease("lyric", {
   id: String(request.query.id ?? "")
 })));
+app.get("/netease/simi", asyncRoute(async (request) => callNetease("simi_song", {
+  id: String(request.query.id ?? "")
+})));
+app.get("/netease/recommend/songs", asyncRoute(async () => callNetease("recommend_songs", {})));
 
 app.use((error, _request, response, _next) => {
   const status = error.statusCode ?? 500;

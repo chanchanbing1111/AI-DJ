@@ -11,6 +11,7 @@ const state = {
   mood: MOODS.focus,
   weather: null,
   plan: [],
+  lyrics: [],
   introducedTrackId: null,
   speakingStartedAt: 0,
   speakingTimer: null,
@@ -97,7 +98,7 @@ function setupEvents() {
   els.broadcastPlay.addEventListener("click", togglePlayback);
   els.nextBtn.addEventListener("click", async () => {
     state.introducedTrackId = null;
-    renderReply(await ask("\u6362\u4e00\u9996\uff0c\u5ef6\u7eed\u73b0\u5728\u7684\u5929\u6c14\u548c\u5fc3\u60c5", false));
+    await playRecommendedNext();
   });
   els.voiceBtn.addEventListener("click", () => playDjIntro({ resumeMusic: !els.player.paused }));
   document.querySelector(".brand").addEventListener("dblclick", () => els.profileDialog.showModal());
@@ -163,6 +164,7 @@ async function ask(message, shouldPush = true) {
 
 function renderReply(reply, shouldScroll = true) {
   state.reply = reply;
+  state.lyrics = [];
   const track = reply.play;
   els.title.textContent = track?.title ?? "No track";
   els.meta.textContent = track ? `${track.artist} - PLAYING` : "WAITING";
@@ -177,6 +179,7 @@ function renderReply(reply, shouldScroll = true) {
       els.player.load();
     }
     renderTrackCard(track, shouldScroll);
+    loadLyrics(track).catch(() => {});
   }
 }
 
@@ -209,10 +212,10 @@ async function togglePlayback() {
   }
 
   if (els.player.paused) {
-    await playMusic();
     if (state.reply?.play && state.introducedTrackId !== state.reply.play.id) {
-      playDjIntro({ resumeMusic: true, leadInMs: 650 });
+      playDjIntro({ resumeMusic: true, leadInMs: 200 });
     }
+    await playMusic();
     return;
   }
 
@@ -229,6 +232,7 @@ async function resolvePlayableUrl(track) {
     track.url = normalizeAudioUrl(result.url);
     track.playable = true;
     els.player.src = track.url;
+    loadLyrics(track).catch(() => {});
     return true;
   } catch {
     return false;
@@ -352,6 +356,59 @@ function advanceTranscript() {
   lines.forEach((line, index) => line.classList.toggle("active", index === activeIndex));
 }
 
+async function loadLyrics(track) {
+  if (!track.sourceId || track.source !== "netease") {
+    state.lyrics = [];
+    return;
+  }
+
+  const data = await api(`/api/netease/lyric?id=${encodeURIComponent(track.sourceId)}`);
+  const text = data.lrc?.lyric ?? data.body?.lrc?.lyric ?? "";
+  state.lyrics = parseLrc(text);
+  if (state.lyrics.length) {
+    renderLyrics();
+  }
+}
+
+function renderLyrics() {
+  els.transcript.innerHTML = state.lyrics
+    .slice(0, 80)
+    .map((line, index) => `<div class="line lyric-line ${index === 0 ? "active" : ""}" data-time="${line.time}"><b>${formatTime(line.time)}</b><span>${escapeHtml(line.text)}</span></div>`)
+    .join("");
+}
+
+function updateLyricHighlight() {
+  if (!state.lyrics.length || els.broadcastCard.classList.contains("speaking")) return;
+  const current = els.player.currentTime;
+  let activeIndex = 0;
+  for (let index = 0; index < state.lyrics.length; index += 1) {
+    if (state.lyrics[index].time <= current) activeIndex = index;
+    else break;
+  }
+
+  const lines = els.transcript.querySelectorAll(".lyric-line");
+  lines.forEach((line, index) => {
+    const active = index === activeIndex;
+    line.classList.toggle("active", active);
+    if (active) line.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+}
+
+function parseLrc(text) {
+  return text
+    .split("\n")
+    .flatMap((line) => {
+      const matches = [...line.matchAll(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g)];
+      const content = line.replace(/\[[^\]]+\]/g, "").trim();
+      if (!matches.length || !content) return [];
+      return matches.map((match) => ({
+        time: Number(match[1]) * 60 + Number(match[2]) + Number(`0.${match[3] ?? 0}`),
+        text: content
+      }));
+    })
+    .sort((a, b) => a.time - b.time);
+}
+
 function titleForBroadcast(reply) {
   const hour = new Date().getHours();
   const period = hour >= 20 ? "Night" : hour >= 12 ? "Afternoon" : "Morning";
@@ -399,6 +456,45 @@ function renderTrackCard(track, shouldScroll = true) {
     `<div class="track-card"><strong>* ${escapeHtml(track.title ?? track.name)}</strong><span>${escapeHtml(track.artist)}</span>${status}</div>`
   );
   if (shouldScroll) scrollToLatest();
+}
+
+async function playRecommendedNext() {
+  const current = state.reply?.play;
+  const candidate = await getRecommendedTrack(current);
+  if (candidate) {
+    renderReply({
+      say: `我从${current?.title ?? "当前歌单"}往外扩了一首，接下来试试 ${candidate.artist} 的《${candidate.title}》。`,
+      play: candidate,
+      reason: "根据当前歌曲的网易云相似歌曲或每日推荐扩展。",
+      segue: "不只在已有歌单里转，往相近的情绪继续走。",
+      context: { mood: state.mood, weather: state.weather }
+    });
+    return;
+  }
+
+  renderReply(await ask("\u6362\u4e00\u9996\uff0c\u5ef6\u7eed\u73b0\u5728\u7684\u5929\u6c14\u548c\u5fc3\u60c5", false));
+}
+
+async function getRecommendedTrack(current) {
+  const seen = new Set(state.profile.playlists.map((track) => track.sourceId ?? `${track.title}:${track.artist}`));
+  const endpoints = [];
+  if (current?.sourceId && current.source === "netease") {
+    endpoints.push(`/api/netease/similar?id=${encodeURIComponent(current.sourceId)}`);
+  }
+  endpoints.push("/api/netease/recommend/songs");
+
+  for (const endpoint of endpoints) {
+    try {
+      const result = await api(endpoint);
+      const tracks = result.tracks ?? [];
+      const next = tracks.find((track) => !seen.has(track.sourceId ?? `${track.title}:${track.artist}`));
+      if (next) return next;
+    } catch {
+      // Try the next recommendation source.
+    }
+  }
+
+  return null;
 }
 
 function renderPlan() {
@@ -577,6 +673,7 @@ function tick() {
 function updateProgress() {
   const ratio = els.player.duration ? (els.player.currentTime / els.player.duration) * 100 : 0;
   els.progress.style.width = `${ratio}%`;
+  updateLyricHighlight();
 }
 
 function contextParams() {

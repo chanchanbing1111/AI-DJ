@@ -98,6 +98,16 @@ export async function getNeteaseLyric(env: Env, id: string): Promise<unknown> {
   return neteaseFetch(env, "/lyric", { id });
 }
 
+export async function getNeteaseSimilarSongs(env: Env, id: string): Promise<Track[]> {
+  const data = await neteaseFetch<{ songs?: NeteaseSong[] }>(env, "/simi/song", { id });
+  return (data.songs ?? []).map(songToTrack);
+}
+
+export async function getNeteaseRecommendedSongs(env: Env): Promise<Track[]> {
+  const data = await neteaseFetch<{ data?: { dailySongs?: NeteaseSong[] }; recommend?: NeteaseSong[] }>(env, "/recommend/songs", {});
+  return (data.data?.dailySongs ?? data.recommend ?? []).map(songToTrack);
+}
+
 async function neteaseFetch<T>(env: Env, path: string, params: Record<string, string>): Promise<T> {
   if (!env.NETEASE_API_BASE) {
     throw new Error("NETEASE_API_BASE is not configured. Deploy a NeteaseCloudMusicApi-compatible service and set this variable.");
@@ -145,6 +155,8 @@ function proxyPath(path: string): string {
     "/search": "/netease/search",
     "/song/url/v1": "/netease/url",
     "/lyric": "/netease/lyric",
+    "/simi/song": "/netease/simi",
+    "/recommend/songs": "/netease/recommend/songs",
     "/user/account": "/netease/me",
     "/user/playlist": "/netease/playlists",
     "/playlist/detail": "/netease/playlist"
