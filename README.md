@@ -1,20 +1,29 @@
 # AI DJ
 
-私人 AI DJ 电台，部署在 Cloudflare Workers。当前版本包含：
+私人 AI DJ 电台，部署在 Cloudflare Workers。
 
-- 黑底点阵风格 PWA 前端
-- Cloudflare Workers API
-- D1 保存口味资料、播放状态和播放记录
-- 天气 + 心情 + 时段选歌
-- DJ 播报卡片，音乐铺底时自动压低音量
-- Workers AI fallback
-- OpenAI-compatible 大模型适配
-- NeteaseCloudMusicApi-compatible 网易云适配
-
-线上地址：
+线上主站：
 
 ```text
 https://ai-dj.chanchanbing1111.workers.dev
+```
+
+GitHub：
+
+```text
+https://github.com/chanchanbing1111/AI-DJ
+```
+
+## 当前架构
+
+```text
+Browser
+  -> Cloudflare Worker / PWA
+  -> D1
+  -> Workers AI or OpenAI-compatible LLM
+  -> netease-proxy on Railway
+  -> NeteaseCloudMusicApi
+  -> Your Netease account cookie
 ```
 
 ## 本地开发
@@ -25,7 +34,7 @@ npm run db:migrate:local
 npm run dev:local
 ```
 
-## Cloudflare 部署
+## 部署主站
 
 ```bash
 npm run db:migrate
@@ -49,67 +58,132 @@ npm run deploy
 ]
 ```
 
-双击页面左上角 `Claudio` 打开 Taste File，把 JSON 粘进去。点 `解析网易云` 会调用：
+双击页面左上角 `Claudio` 打开 Taste File，把 JSON 粘进去。点 `解析网易云` 会调用后端去补网易云元数据。
+
+## 网易云线上接入
+
+仓库里已经包含一个私有网易云 proxy：
 
 ```text
-POST /api/netease/resolve
+services/netease-proxy
 ```
 
-它会用 `name + artist` 搜索网易云，补齐：
+它负责：
 
-- `source`
-- `sourceId`
-- `cover`
-- `externalUrl`
+- 保存你的 `NETEASE_COOKIE`
+- 调用 NeteaseCloudMusicApi npm 包
+- 给 AI-DJ 提供搜索、歌单、歌词、播放 URL 接口
+- 用 `PROXY_TOKEN` 防止别人调用你的网易云账号接口
 
-注意：网易云音频能不能站内播放，取决于版权、登录态、地区、会员和 API 返回结果。当前策略是：先解析元数据，能拿到播放 URL 就播放，拿不到就保留为 metadata-only。
+### Railway 部署步骤
 
-## 网易云 API
+1. 打开 Railway。
+2. New Project。
+3. Deploy from GitHub repo。
+4. 选择 `chanchanbing1111/AI-DJ`。
+5. Root Directory 填：
 
-本项目按 NeteaseCloudMusicApi 兼容服务调用。你需要先部署或准备一个网易云 API 服务，然后设置：
+```text
+services/netease-proxy
+```
+
+6. 在 Railway Variables 添加：
+
+```env
+PROXY_TOKEN=一串很长的随机密码
+NETEASE_COOKIE=你的网易云 Cookie
+```
+
+7. 部署成功后复制 Railway 生成的公网地址，例如：
+
+```text
+https://netease-proxy-production.up.railway.app
+```
+
+### 配置 Cloudflare 主站调用 proxy
+
+在 Cloudflare AI-DJ 项目中设置：
 
 ```bash
-npx wrangler secret put NETEASE_COOKIE
+npx wrangler secret put NETEASE_PROXY_TOKEN
 ```
 
-并在 `wrangler.jsonc` 里配置：
+这里输入的值必须和 Railway 里的 `PROXY_TOKEN` 完全一样。
+
+然后把 `wrangler.jsonc` 里的 `NETEASE_API_BASE` 改成 Railway 地址：
 
 ```jsonc
-"NETEASE_API_BASE": "https://你的-netease-api.example.com"
+"NETEASE_API_BASE": "https://netease-proxy-production.up.railway.app"
 ```
 
-已提供接口：
+再部署：
+
+```bash
+npm run deploy
+```
+
+## 网易云 Cookie
+
+不要把 Cookie 发到聊天里，也不要提交到 GitHub。
+
+获取方式：
+
+1. 浏览器打开 `https://music.163.com`。
+2. 登录网易云账号。
+3. 按 `F12`。
+4. 打开 `Application` / `应用`。
+5. 找到 `Cookies` -> `https://music.163.com`。
+6. 复制包含 `MUSIC_U=...` 的 Cookie。
+7. 粘贴到 Railway 的 `NETEASE_COOKIE` 变量中。
+
+## 已提供的网易云接口
+
+AI-DJ 主站接口：
 
 ```text
+GET  /api/netease/me
+GET  /api/netease/playlists
+GET  /api/netease/playlist?id=歌单ID
 GET  /api/netease/search?q=关键词
 POST /api/netease/resolve
-GET  /api/netease/url?id=网易云歌曲ID
-GET  /api/netease/lyric?id=网易云歌曲ID
+GET  /api/netease/url?id=歌曲ID
+GET  /api/netease/lyric?id=歌曲ID
 ```
 
-`NETEASE_COOKIE` 可选，但很多歌曲 URL 和会员/私人歌单能力需要登录 Cookie。
+netease-proxy 内部接口：
+
+```text
+GET /health
+GET /netease/me
+GET /netease/search?q=关键词
+GET /netease/playlists
+GET /netease/playlist?id=歌单ID
+GET /netease/url?id=歌曲ID
+GET /netease/lyric?id=歌曲ID
+```
+
+除了 `/health`，其他 proxy 接口都需要：
+
+```http
+Authorization: Bearer PROXY_TOKEN
+```
 
 ## 大模型 API
 
-默认会使用 Cloudflare Workers AI。若配置了 `LLM_API_KEY`，会优先走 OpenAI-compatible Chat Completions：
+默认使用 Cloudflare Workers AI。如果配置了 `LLM_API_KEY`，会优先走 OpenAI-compatible Chat Completions：
 
 ```bash
 npx wrangler secret put LLM_API_KEY
 ```
 
-`wrangler.jsonc` 中可改：
+`wrangler.jsonc` 中可配置：
 
 ```jsonc
 "LLM_BASE_URL": "https://api.openai.com/v1",
 "LLM_MODEL": "gpt-4o-mini"
 ```
 
-也可以换成 DeepSeek、通义、火山等兼容 OpenAI `/chat/completions` 的服务：
-
-```jsonc
-"LLM_BASE_URL": "https://api.deepseek.com/v1",
-"LLM_MODEL": "deepseek-chat"
-```
+也可以换成 DeepSeek 等兼容 OpenAI `/chat/completions` 的服务。
 
 ## 语音合成
 

@@ -1,5 +1,13 @@
 import { generateJson } from "./llm";
-import { getNeteaseLyric, getNeteaseUrl, resolveNeteaseTracks, searchNetease } from "./netease";
+import {
+  getNeteaseLyric,
+  getNeteaseMe,
+  getNeteasePlaylistTracks,
+  getNeteaseUrl,
+  getNeteaseUserPlaylists,
+  resolveNeteaseTracks,
+  searchNetease
+} from "./netease";
 import { chooseTrack, fallbackDjReply, pickRoutine } from "./persona";
 import { getNow, getProfile, saveNow, saveProfile } from "./state";
 import type { DjReply, Env, MoodContext, TasteProfile, Track } from "./types";
@@ -73,6 +81,18 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
 
   if (request.method === "GET" && url.pathname === "/api/netease/search") {
     return json(await searchNetease(env, url.searchParams.get("q") ?? ""));
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/netease/me") {
+    return json(await getNeteaseMe(env));
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/netease/playlists") {
+    return json(await getNeteaseUserPlaylists(env));
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/netease/playlist") {
+    return json({ tracks: await getNeteasePlaylistTracks(env, url.searchParams.get("id") ?? "") });
   }
 
   if (request.method === "POST" && url.pathname === "/api/netease/resolve") {

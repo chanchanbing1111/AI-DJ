@@ -7,6 +7,7 @@ export interface Env {
   TTS_MODEL: string;
   NETEASE_API_BASE?: string;
   NETEASE_COOKIE?: string;
+  NETEASE_PROXY_TOKEN?: string;
   LLM_API_KEY?: string;
   LLM_BASE_URL?: string;
   LLM_MODEL?: string;

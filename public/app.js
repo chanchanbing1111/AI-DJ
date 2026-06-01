@@ -191,9 +191,13 @@ async function togglePlayback() {
   if (!state.reply?.play) return;
 
   if (!state.reply.play.url) {
-    await playDjIntro({ resumeMusic: false });
-    pushDj("\u8fd9\u9996\u6b4c\u76ee\u524d\u53ea\u6709\u7ed3\u6784\u5316\u4fe1\u606f\uff0c\u8fd8\u6ca1\u6709\u53ef\u64ad\u653e\u97f3\u9891\u5730\u5740\u3002\u4e0b\u4e00\u6b65\u6211\u4eec\u53ef\u4ee5\u7528\u7f51\u6613\u4e91 API \u5c1d\u8bd5\u89e3\u6790\u64ad\u653e\u5730\u5740\u3002");
-    return;
+    const resolved = await resolvePlayableUrl(state.reply.play);
+    if (!resolved) {
+      await playDjIntro({ resumeMusic: false });
+      const link = state.reply.play.externalUrl ? ` ${state.reply.play.externalUrl}` : "";
+      pushDj(`\u8fd9\u9996\u6b4c\u7f51\u6613\u4e91\u6682\u65f6\u6ca1\u6709\u8fd4\u56de\u53ef\u64ad\u653e\u5730\u5740\uff0c\u53ef\u80fd\u662f\u7248\u6743\u3001\u4f1a\u5458\u6216\u767b\u5f55\u6001\u9650\u5236\u3002${link}`);
+      return;
+    }
   }
 
   if (els.player.paused) {
@@ -207,6 +211,20 @@ async function togglePlayback() {
   els.player.pause();
   els.playBtn.textContent = ">";
   els.broadcastPlay.textContent = ">";
+}
+
+async function resolvePlayableUrl(track) {
+  if (!track.sourceId || track.source !== "netease") return false;
+  try {
+    const result = await api(`/api/netease/url?id=${encodeURIComponent(track.sourceId)}`);
+    if (!result.url) return false;
+    track.url = result.url;
+    track.playable = true;
+    els.player.src = result.url;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function playMusic() {

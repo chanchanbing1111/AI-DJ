@@ -9,6 +9,43 @@ interface NeteaseSong {
   album?: { name?: string; picUrl?: string };
 }
 
+interface NeteasePlaylist {
+  id: number | string;
+  name: string;
+  coverImgUrl?: string;
+  trackCount?: number;
+}
+
+interface NeteaseAccount {
+  profile?: {
+    userId?: number | string;
+    nickname?: string;
+    avatarUrl?: string;
+  };
+}
+
+export async function getNeteaseMe(env: Env): Promise<NeteaseAccount> {
+  return neteaseFetch(env, "/user/account", {});
+}
+
+export async function getNeteaseUserPlaylists(env: Env): Promise<NeteasePlaylist[]> {
+  const account = await getNeteaseMe(env);
+  const uid = account.profile?.userId;
+  if (!uid) throw new Error("Could not read Netease userId from cookie. Check NETEASE_COOKIE.");
+
+  const data = await neteaseFetch<{ playlist?: NeteasePlaylist[] }>(env, "/user/playlist", {
+    uid: String(uid),
+    limit: "1000"
+  });
+
+  return data.playlist ?? [];
+}
+
+export async function getNeteasePlaylistTracks(env: Env, id: string): Promise<Track[]> {
+  const data = await neteaseFetch<{ playlist?: { tracks?: NeteaseSong[] } }>(env, "/playlist/detail", { id });
+  return (data.playlist?.tracks ?? []).map(songToTrack);
+}
+
 export async function searchNetease(env: Env, keyword: string): Promise<Track[]> {
   const data = await neteaseFetch<{ result?: { songs?: NeteaseSong[] } }>(env, "/search", {
     keywords: keyword,
@@ -66,11 +103,12 @@ async function neteaseFetch<T>(env: Env, path: string, params: Record<string, st
     throw new Error("NETEASE_API_BASE is not configured. Deploy a NeteaseCloudMusicApi-compatible service and set this variable.");
   }
 
-  const url = new URL(path, ensureSlash(env.NETEASE_API_BASE));
+  const url = new URL(env.NETEASE_PROXY_TOKEN ? proxyPath(path) : path, ensureSlash(env.NETEASE_API_BASE));
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
   const headers: HeadersInit = {};
   if (env.NETEASE_COOKIE) headers.cookie = env.NETEASE_COOKIE;
+  if (env.NETEASE_PROXY_TOKEN) headers.authorization = `Bearer ${env.NETEASE_PROXY_TOKEN}`;
 
   const response = await fetch(url, { headers });
   if (!response.ok) {
@@ -100,6 +138,19 @@ function songToTrack(song: NeteaseSong): Track {
 
 function ensureSlash(value: string): string {
   return value.endsWith("/") ? value : `${value}/`;
+}
+
+function proxyPath(path: string): string {
+  const map: Record<string, string> = {
+    "/search": "/netease/search",
+    "/song/url/v1": "/netease/url",
+    "/lyric": "/netease/lyric",
+    "/user/account": "/netease/me",
+    "/user/playlist": "/netease/playlists",
+    "/playlist/detail": "/netease/playlist"
+  };
+
+  return map[path] ?? path;
 }
 
 function hash(value: string): number {
