@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ai-dj",
+  "account_id": "f0a597f0134f247bd793592dc8964233",
   "main": "src/worker.ts",
   "compatibility_date": "2026-05-28",
   "workers_dev": true,
@@ -26,7 +27,7 @@
     "DJ_NAME": "Claudio",
     "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "TTS_MODEL": "@cf/deepgram/aura-1",
-    "NETEASE_API_BASE": "",
+    "NETEASE_API_BASE": "https://ai-dj-production.up.railway.app",
     "LLM_BASE_URL": "https://api.openai.com/v1",
     "LLM_MODEL": "gpt-4o-mini"
   }
