@@ -1,4 +1,5 @@
 import { generateJson } from "./llm";
+import { computeAgentReply } from "./agent";
 import {
   getNeteaseLyric,
   getNeteaseMe,
@@ -61,7 +62,14 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
 
   if (request.method === "POST" && url.pathname === "/api/chat") {
     const body = (await request.json()) as { message?: string; context?: MoodContext };
-    const reply = await computeReply(env, body.message ?? "What should I listen to now?", body.context ?? {});
+    const profile = await getProfile(env);
+    const reply = await computeAgentReply(env, {
+      message: body.message ?? "What should I listen to now?",
+      context: body.context ?? {},
+      profile,
+      current: await getNow(env)
+    });
+    await saveNow(env, reply);
     return json(reply);
   }
 
