@@ -105,6 +105,10 @@ function setupEvents() {
   els.resolveNetease.addEventListener("click", resolveNeteasePlaylist);
   els.saveProfile.addEventListener("click", saveProfile);
   els.player.addEventListener("timeupdate", updateProgress);
+  els.player.addEventListener("error", () => {
+    const code = els.player.error?.code;
+    pushDj(`\u97f3\u9891\u52a0\u8f7d\u5931\u8d25\uff0c\u53ef\u80fd\u662f\u7f51\u6613\u4e91\u64ad\u653e\u5730\u5740\u8fc7\u671f\u3001\u7248\u6743\u9650\u5236\u6216\u6d4f\u89c8\u5668\u963b\u6b62\u3002error code: ${code ?? "unknown"}`);
+  });
   document.querySelector(".volume input")?.addEventListener("input", (event) => {
     state.baseVolume = Number(event.target.value);
     if (!els.broadcastCard.classList.contains("speaking")) {
@@ -222,9 +226,9 @@ async function resolvePlayableUrl(track) {
   try {
     const result = await api(`/api/netease/url?id=${encodeURIComponent(track.sourceId)}`);
     if (!result.url) return false;
-    track.url = result.url;
+    track.url = normalizeAudioUrl(result.url);
     track.playable = true;
-    els.player.src = result.url;
+    els.player.src = track.url;
     return true;
   } catch {
     return false;
@@ -233,11 +237,15 @@ async function resolvePlayableUrl(track) {
 
 async function playMusic() {
   if (!state.reply?.play?.url) return;
-  await els.player.play();
-  els.playBtn.textContent = "II";
-  els.broadcastPlay.textContent = "II";
-  if (state.reply?.play) {
-    api("/api/play", { method: "POST", body: { track: state.reply.play, reason: state.reply.reason } }).catch(() => {});
+  try {
+    await els.player.play();
+    els.playBtn.textContent = "II";
+    els.broadcastPlay.textContent = "II";
+    if (state.reply?.play) {
+      api("/api/play", { method: "POST", body: { track: state.reply.play, reason: state.reply.reason } }).catch(() => {});
+    }
+  } catch (error) {
+    pushDj(`\u6d4f\u89c8\u5668\u6ca1\u80fd\u64ad\u653e\u8fd9\u4e2a\u97f3\u9891\u5730\u5740\uff1a${error.message}`);
   }
 }
 
@@ -553,6 +561,10 @@ function normalizePlaylistInput(items) {
 
 function slug(value) {
   return value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-|-$/g, "").slice(0, 42);
+}
+
+function normalizeAudioUrl(url) {
+  return String(url).replace(/^http:\/\//i, "https://");
 }
 
 function tick() {

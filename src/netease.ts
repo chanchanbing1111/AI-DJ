@@ -90,7 +90,7 @@ export async function getNeteaseUrl(env: Env, id: string): Promise<{ url?: strin
     id,
     level: "standard"
   });
-  const url = data.data?.[0]?.url ?? undefined;
+  const url = data.data?.[0]?.url?.replace(/^http:\/\//i, "https://") ?? undefined;
   return { url, playable: Boolean(url), raw: data };
 }
 
