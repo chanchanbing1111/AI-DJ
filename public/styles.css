@@ -18,6 +18,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-y: auto;
   background:
     radial-gradient(circle at 86% 28%, rgba(95, 71, 189, 0.2), transparent 28%),
     linear-gradient(180deg, #111219 0, #07070a 42%, #0f1017 100%);
@@ -388,7 +389,7 @@ button {
 .transcript {
   min-height: 180px;
   max-height: 230px;
-  overflow: hidden;
+  overflow-y: auto;
   margin-top: 28px;
   border-radius: 22px;
   padding: 24px 28px;

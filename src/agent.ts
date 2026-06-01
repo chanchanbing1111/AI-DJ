@@ -82,17 +82,19 @@ async function planDjAction(
     "Choose how to respond to the user.",
     "Allowed intent: recommend, play, skip, chat, mood.",
     "Allowed tool: playlist_pick, netease_search, netease_similar, netease_daily, none.",
-    "Use netease_search when the user asks for something outside the imported playlist or describes a vibe.",
+    "Use netease_search when the user explicitly asks to play/recommend/find music outside the imported playlist, or describes a listening vibe.",
     "Use netease_similar when the user asks for more like the current song.",
     "Use netease_daily when the user asks for discovery without a clear query.",
     "Use playlist_pick when the imported playlist is enough.",
-    "Use chat only when no song change is needed.",
+    "Use chat when the user is talking to the DJ, asking a question, sharing feelings, or not clearly asking to change music.",
+    "For chat, choose tool none and answer warmly without changing the current track.",
     `User profile: ${JSON.stringify({ name: profile.name, favoriteMoods: profile.favoriteMoods, playlistSize: profile.playlists.length })}`,
     `Current routine: ${JSON.stringify(routine)}`,
     `Weather/mood context: ${JSON.stringify(context)}`,
     `Current track: ${JSON.stringify(current?.play ?? null)}`,
     `User message: ${message}`,
-    "Output fields: intent, tool, query, mood, energy, say, reason, segue."
+    "Output fields: intent, tool, query, mood, energy, say, reason, segue.",
+    "The say field should feel like a human radio DJ: acknowledge the user's situation, mention the music if changing tracks, and make the user feel lighter."
   ].join("\n");
 
   const text = await generateJson(env, [
@@ -159,7 +161,9 @@ async function selectFinalTrack(env: Env, input: {
     `Weather/mood context: ${JSON.stringify(input.context)}`,
     `User message: ${input.message}`,
     `Candidates: ${JSON.stringify(compactCandidates)}`,
-    "Pick the best candidate. Keep say under 120 Chinese characters when writing Chinese."
+    "Pick the best candidate.",
+    "The say field must introduce the chosen song, connect it to the user's mood/weather/time, explain why it fits, and sound warm and mood-lifting.",
+    "Keep say between 60 and 140 Chinese characters when writing Chinese."
   ].join("\n");
 
   const text = await generateJson(env, [
@@ -180,13 +184,16 @@ async function selectFinalTrack(env: Env, input: {
 }
 
 function heuristicPlan(message: string, current?: DjReply | null): AgentPlan {
+  if (/^(hi|hello|hey|你好|在吗|聊聊|谢谢|为什么|怎么|可以吗)/i.test(message.trim())) {
+    return { intent: "chat", tool: "none", reason: "User is chatting, not asking for a track change." };
+  }
   if (/similar|like this|类似|像这首|差不多/.test(message) && current?.play?.sourceId) {
     return { intent: "recommend", tool: "netease_similar", reason: "User asked for similar music." };
   }
-  if (/new|discover|推荐|找|来点|换一首|下一首/.test(message)) {
+  if (/new|discover|recommend|play|song|music|推荐|找|来点|放|播|歌|音乐|换一首|下一首/.test(message)) {
     return { intent: "recommend", tool: "netease_search", query: message, reason: "User asked for a recommendation." };
   }
-  return { intent: "play", tool: "playlist_pick", reason: "Use imported playlist and current context." };
+  return { intent: "chat", tool: "none", reason: "Default to conversation unless the user asks for music." };
 }
 
 function cleanJson(text: string): string {

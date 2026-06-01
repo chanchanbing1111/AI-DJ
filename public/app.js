@@ -80,7 +80,7 @@ function setupEvents() {
     if (!message) return;
     els.message.value = "";
     pushUser(message);
-    renderReply(await ask(message, false));
+    renderReply(await ask(message, false), true, { autoPlay: true });
   });
 
   document.querySelectorAll("[data-mood]").forEach((button) => {
@@ -89,7 +89,7 @@ function setupEvents() {
       document.querySelectorAll("[data-mood]").forEach((item) => item.classList.toggle("active", item === button));
       els.weatherLine.textContent = weatherText();
       await refreshPlan();
-      renderReply(await ask(`\u6211\u73b0\u5728\u60f3\u8981${state.mood}\u4e00\u70b9`, false));
+      renderReply(await ask(`\u6211\u73b0\u5728\u60f3\u8981${state.mood}\u4e00\u70b9`, false), true, { autoPlay: false });
     });
   });
   document.querySelector(`[data-mood="${MOODS.focus}"]`)?.classList.add("active");
@@ -162,7 +162,7 @@ async function ask(message, shouldPush = true) {
   });
 }
 
-function renderReply(reply, shouldScroll = true) {
+function renderReply(reply, shouldScroll = true, options = {}) {
   state.reply = reply;
   state.lyrics = [];
   const track = reply.play;
@@ -180,6 +180,9 @@ function renderReply(reply, shouldScroll = true) {
     }
     renderTrackCard(track, shouldScroll);
     loadLyrics(track).catch(() => {});
+    if (options.autoPlay) {
+      startCurrentTrack().catch(() => {});
+    }
   }
 }
 
@@ -200,7 +203,17 @@ function renderBroadcast(reply) {
 
 async function togglePlayback() {
   if (!state.reply?.play) return;
+  if (els.player.paused) {
+    await startCurrentTrack();
+    return;
+  }
 
+  els.player.pause();
+  els.playBtn.textContent = ">";
+  els.broadcastPlay.textContent = ">";
+}
+
+async function startCurrentTrack() {
   if (!state.reply.play.url) {
     const resolved = await resolvePlayableUrl(state.reply.play);
     if (!resolved) {
@@ -211,17 +224,10 @@ async function togglePlayback() {
     }
   }
 
-  if (els.player.paused) {
-    if (state.reply?.play && state.introducedTrackId !== state.reply.play.id) {
-      playDjIntro({ resumeMusic: true, leadInMs: 200 });
-    }
-    await playMusic();
-    return;
+  if (state.reply?.play && state.introducedTrackId !== state.reply.play.id) {
+    playDjIntro({ resumeMusic: true, leadInMs: 180 });
   }
-
-  els.player.pause();
-  els.playBtn.textContent = ">";
-  els.broadcastPlay.textContent = ">";
+  await playMusic();
 }
 
 async function resolvePlayableUrl(track) {
@@ -438,7 +444,7 @@ function pushDj(text, shouldScroll = true) {
     "beforeend",
     `<div class="message dj"><div class="avatar"></div><div><div class="speaker">CLAUDIO</div><div class="bubble">${escapeHtml(text)}</div></div></div>`
   );
-  if (shouldScroll) scrollToLatest();
+  if (shouldScroll) maybeScrollToLatest();
 }
 
 function pushUser(text) {
@@ -446,7 +452,7 @@ function pushUser(text) {
     "beforeend",
     `<div class="message user"><div class="bubble">${escapeHtml(text)}</div><div class="avatar"></div></div>`
   );
-  scrollToLatest();
+  maybeScrollToLatest();
 }
 
 function renderTrackCard(track, shouldScroll = true) {
@@ -455,7 +461,7 @@ function renderTrackCard(track, shouldScroll = true) {
     "beforeend",
     `<div class="track-card"><strong>* ${escapeHtml(track.title ?? track.name)}</strong><span>${escapeHtml(track.artist)}</span>${status}</div>`
   );
-  if (shouldScroll) scrollToLatest();
+  if (shouldScroll) maybeScrollToLatest();
 }
 
 async function playRecommendedNext() {
@@ -468,11 +474,11 @@ async function playRecommendedNext() {
       reason: "根据当前歌曲的网易云相似歌曲或每日推荐扩展。",
       segue: "不只在已有歌单里转，往相近的情绪继续走。",
       context: { mood: state.mood, weather: state.weather }
-    });
+    }, true, { autoPlay: true });
     return;
   }
 
-  renderReply(await ask("\u6362\u4e00\u9996\uff0c\u5ef6\u7eed\u73b0\u5728\u7684\u5929\u6c14\u548c\u5fc3\u60c5", false));
+  renderReply(await ask("\u6362\u4e00\u9996\uff0c\u5ef6\u7eed\u73b0\u5728\u7684\u5929\u6c14\u548c\u5fc3\u60c5", false), true, { autoPlay: true });
 }
 
 async function getRecommendedTrack(current) {
@@ -710,8 +716,15 @@ function formatTime(value) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function scrollToLatest() {
+function maybeScrollToLatest() {
+  if (els.player && !els.player.paused) return;
+  if (isUserReading()) return;
   window.requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
+}
+
+function isUserReading() {
+  const distanceFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+  return distanceFromBottom > 220;
 }
 
 function escapeHtml(value) {
