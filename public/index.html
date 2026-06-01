@@ -105,6 +105,16 @@
           <h2>Taste File</h2>
           <label>昵称 <input id="profileName" /></label>
           <label>常用情绪 <input id="moods" placeholder="清醒, 松弛, 专注" /></label>
+          <section class="netease-panel">
+            <div class="netease-head">
+              <div>
+                <strong>网易云</strong>
+                <span id="neteaseStatus">未连接</span>
+              </div>
+              <button id="loadNetease" type="button">连接网易云</button>
+            </div>
+            <div id="neteasePlaylists" class="netease-list"></div>
+          </section>
           <label>歌单 JSON <textarea id="playlistJson" spellcheck="false"></textarea></label>
           <menu>
             <button value="cancel" type="submit">关闭</button>

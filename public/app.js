@@ -46,6 +46,9 @@ const els = {
   profileDialog: document.querySelector("#profileDialog"),
   profileName: document.querySelector("#profileName"),
   moods: document.querySelector("#moods"),
+  neteaseStatus: document.querySelector("#neteaseStatus"),
+  loadNetease: document.querySelector("#loadNetease"),
+  neteasePlaylists: document.querySelector("#neteasePlaylists"),
   playlistJson: document.querySelector("#playlistJson"),
   resolveNetease: document.querySelector("#resolveNetease"),
   saveProfile: document.querySelector("#saveProfile")
@@ -98,6 +101,7 @@ function setupEvents() {
   });
   els.voiceBtn.addEventListener("click", () => playDjIntro({ resumeMusic: !els.player.paused }));
   document.querySelector(".brand").addEventListener("dblclick", () => els.profileDialog.showModal());
+  els.loadNetease.addEventListener("click", loadNeteaseAccount);
   els.resolveNetease.addEventListener("click", resolveNeteasePlaylist);
   els.saveProfile.addEventListener("click", saveProfile);
   els.player.addEventListener("timeupdate", updateProgress);
@@ -445,6 +449,75 @@ async function resolveNeteasePlaylist() {
   } finally {
     els.resolveNetease.disabled = false;
     els.resolveNetease.textContent = "\u89e3\u6790\u7f51\u6613\u4e91";
+  }
+}
+
+async function loadNeteaseAccount() {
+  els.loadNetease.disabled = true;
+  els.loadNetease.textContent = "Loading...";
+  els.neteaseStatus.textContent = "连接中";
+  els.neteasePlaylists.innerHTML = "";
+
+  try {
+    const [me, playlists] = await Promise.all([api("/api/netease/me"), api("/api/netease/playlists")]);
+    const profile = me.profile ?? me.body?.profile;
+    els.neteaseStatus.textContent = profile?.nickname ? `已连接：${profile.nickname}` : "已连接";
+    renderNeteasePlaylists(Array.isArray(playlists) ? playlists : playlists.playlist ?? []);
+  } catch (error) {
+    els.neteaseStatus.textContent = "连接失败";
+    els.neteasePlaylists.innerHTML = `<div class="netease-item"><span>${escapeHtml(error.message)}</span></div>`;
+  } finally {
+    els.loadNetease.disabled = false;
+    els.loadNetease.textContent = "\u8fde\u63a5\u7f51\u6613\u4e91";
+  }
+}
+
+function renderNeteasePlaylists(playlists) {
+  if (!playlists.length) {
+    els.neteasePlaylists.innerHTML = `<div class="netease-item"><span>No playlists found.</span></div>`;
+    return;
+  }
+
+  els.neteasePlaylists.innerHTML = playlists
+    .map(
+      (playlist) => `
+        <div class="netease-item">
+          <div>
+            <strong>${escapeHtml(playlist.name)}</strong>
+            <span>${playlist.trackCount ?? 0} tracks</span>
+          </div>
+          <button type="button" data-playlist-id="${escapeHtml(playlist.id)}">\u5bfc\u5165</button>
+        </div>`
+    )
+    .join("");
+
+  els.neteasePlaylists.querySelectorAll("[data-playlist-id]").forEach((button) => {
+    button.addEventListener("click", () => importNeteasePlaylist(button.dataset.playlistId, button));
+  });
+}
+
+async function importNeteasePlaylist(id, button) {
+  if (!id) return;
+  button.disabled = true;
+  button.textContent = "Importing...";
+  try {
+    const result = await api(`/api/netease/playlist?id=${encodeURIComponent(id)}`);
+    const tracks = result.tracks ?? [];
+    els.playlistJson.value = JSON.stringify(
+      tracks.map((track) => ({
+        name: track.title ?? track.name,
+        artist: track.artist,
+        source: track.source,
+        sourceId: track.sourceId,
+        cover: track.cover,
+        externalUrl: track.externalUrl
+      })),
+      null,
+      2
+    );
+  } finally {
+    button.disabled = false;
+    button.textContent = "\u5bfc\u5165";
   }
 }
 

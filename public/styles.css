@@ -581,6 +581,55 @@ dialog {
   min-height: 240px;
 }
 
+.netease-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.netease-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.netease-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.netease-head span,
+.netease-list span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.netease-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  margin-top: 12px;
+}
+
+.netease-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.netease-item strong {
+  display: block;
+  color: var(--text);
+}
+
 @media (max-width: 780px) {
   .topbar {
     height: 82px;
