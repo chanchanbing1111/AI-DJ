@@ -26,7 +26,12 @@
   "vars": {
     "DJ_NAME": "Claudio",
     "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
-    "TTS_MODEL": "@cf/deepgram/aura-1",
+    "TTS_MODEL": "@cf/myshell-ai/melotts",
+    "TTS_LANG": "zh",
+    "MINIMAX_BASE_URL": "https://api.minimaxi.com/v1",
+    "MINIMAX_TTS_MODEL": "speech-2.8-hd",
+    "MINIMAX_TTS_VOICE_ID": "Friendly_Person",
+    "EXA_BASE_URL": "https://api.exa.ai",
     "NETEASE_API_BASE": "https://ai-dj-production.up.railway.app",
     "LLM_BASE_URL": "https://api.deepseek.com/v1",
     "LLM_MODEL": "deepseek-v4-pro"

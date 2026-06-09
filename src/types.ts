@@ -5,12 +5,23 @@ export interface Env {
   DJ_NAME: string;
   AI_MODEL: string;
   TTS_MODEL: string;
+  TTS_LANG?: string;
+  TTS_SPEAKER?: string;
   NETEASE_API_BASE?: string;
   NETEASE_COOKIE?: string;
   NETEASE_PROXY_TOKEN?: string;
   LLM_API_KEY?: string;
   LLM_BASE_URL?: string;
   LLM_MODEL?: string;
+  MINIMAX_API_KEY?: string;
+  MINIMAX_GROUP_ID?: string;
+  MINIMAX_BASE_URL?: string;
+  MINIMAX_TTS_MODEL?: string;
+  MINIMAX_TTS_VOICE_ID?: string;
+  TAVILY_API_KEY?: string;
+  TAVILY_BASE_URL?: string;
+  EXA_API_KEY?: string;
+  EXA_BASE_URL?: string;
 }
 
 export interface Track {
@@ -20,6 +31,7 @@ export interface Track {
   url?: string;
   name?: string;
   album?: string;
+  background?: string;
   cover?: string;
   mood?: string[];
   energy?: number;
@@ -67,4 +79,23 @@ export interface DjReply {
   reason: string;
   segue: string;
   context?: MoodContext;
+  intent?: "recommend" | "play" | "skip" | "chat" | "mood";
+}
+
+export interface UserMemory {
+  preferences: Record<string, unknown>;
+  blockedPhrases: string[];
+  voice: {
+    provider: string;
+    voiceId: string;
+    speed: number;
+    pitch: number;
+  };
+  recentTracks: Array<{
+    trackKey: string;
+    title: string;
+    artist?: string;
+    eventType: string;
+    playedAt: string;
+  }>;
 }

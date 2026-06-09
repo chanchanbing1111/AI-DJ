@@ -86,12 +86,14 @@ export async function resolveNeteaseTracks(env: Env, tracks: Array<Partial<Track
 }
 
 export async function getNeteaseUrl(env: Env, id: string): Promise<{ url?: string; playable: boolean; raw: unknown }> {
-  const data = await neteaseFetch<{ data?: Array<{ url?: string | null }> }>(env, "/song/url/v1", {
-    id,
-    level: "standard"
-  });
-  const url = data.data?.[0]?.url?.replace(/^http:\/\//i, "https://") ?? undefined;
-  return { url, playable: Boolean(url), raw: data };
+  let lastRaw: unknown = null;
+  for (const level of ["standard", "higher", "exhigh"]) {
+    const data = await neteaseFetch<{ data?: Array<{ url?: string | null }> }>(env, "/song/url/v1", { id, level });
+    lastRaw = data;
+    const url = data.data?.[0]?.url?.replace(/^http:\/\//i, "https://") ?? undefined;
+    if (url) return { url, playable: true, raw: data };
+  }
+  return { playable: false, raw: lastRaw };
 }
 
 export async function getNeteaseLyric(env: Env, id: string): Promise<unknown> {
