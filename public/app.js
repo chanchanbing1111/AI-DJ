@@ -466,14 +466,27 @@ function renderReply(reply, shouldScroll = true, options = {}) {
 
   if (reply.say && !options.silent) pushDj(reply.say, shouldScroll);
   if (track) {
-    if (track.url && !currentPlaybackTrack()) {
-      bindAudioTrack(track);
-    }
+    syncPlaybackBindingForReplyTrack(track);
     if (!options.silent) renderTrackCard(track, shouldScroll);
     if (options.autoPlay) {
       startCurrentTrack({ announce: !options.silent, shouldScroll }).catch(() => {});
     }
   }
+}
+
+function syncPlaybackBindingForReplyTrack(track) {
+  const nextKey = trackKey(track);
+  const boundTrack = audioBoundTrack() ?? state.currentTrack;
+  const boundKey = trackKey(boundTrack);
+  if (nextKey && boundKey && nextKey !== boundKey) {
+    els.player.pause();
+    els.player.removeAttribute("src");
+    els.player.load();
+    clearLyrics(boundKey);
+    clearAudioBinding(boundKey);
+    updatePlaybackButtons();
+  }
+  if (track.url) bindAudioTrack(track);
 }
 
 function renderBroadcast(reply) {
