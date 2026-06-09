@@ -163,6 +163,7 @@ export async function getChatHistory(env: Env, limit = 50): Promise<ChatHistoryM
       metadata,
       created_at AS createdAt
      FROM chat_messages
+     WHERE kind IN ('chat', 'dj_reply')
      ORDER BY datetime(created_at) DESC, id DESC
      LIMIT ?`
   ).bind(safeLimit).all<{

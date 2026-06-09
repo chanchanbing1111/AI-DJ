@@ -343,6 +343,7 @@ async function hydrateChatHistory() {
 }
 
 function localOpeningSay(track) {
+  return `This is Claudio. ${track.artist}\u7684\u300a${track.title}\u300b\u7559\u5728\u8fd9\u91cc\u3002\u5982\u679c\u521a\u6253\u5f00\u9875\u9762\uff0c\u5148\u522b\u6025\u7740\u7ed9\u4eca\u5929\u4e0b\u7ed3\u8bba\uff1b\u8ba9\u8fd9\u9996\u6b4c\u628a\u5468\u56f4\u7684\u566a\u58f0\u5411\u540e\u63a8\u4e00\u70b9\uff0c\u628a\u4f60\u5e26\u5230\u6bd4\u521a\u624d\u66f4\u80fd\u542c\u89c1\u81ea\u5df1\u7684\u4f4d\u7f6e\u3002`;
   return `This is Claudio。先把频道打开。今天不用一上来就解释自己，桌面、窗外和耳机都留一点余地。${track.artist}的《${track.title}》。如果早上的心还没完全醒，就让这首歌先替你把周围的声音隔开一点。`;
 }
 
@@ -1095,12 +1096,18 @@ function currentLyricContext() {
   const start = Math.max(0, active - 8);
   const end = Math.min(state.lyrics.length, active + 24);
   const windowLines = state.lyrics.slice(start, end);
-  const lines = windowLines.length ? windowLines : state.lyrics.slice(0, 24);
+  const lines = lyricSummaryLines(windowLines.length ? windowLines : state.lyrics);
   return lines
     .map((line) => line.text)
     .filter(Boolean)
     .join(" / ")
     .slice(0, 1200);
+}
+
+function lyricSummaryLines(lines) {
+  const clean = lines.filter((line) => line?.text && !isLyricCredit(line.text));
+  if (clean.length >= 10) return clean.slice(0, 32);
+  return state.lyrics.filter((line) => line?.text && !isLyricCredit(line.text)).slice(0, 36);
 }
 
 function bindAudioTrack(track) {
@@ -1282,10 +1289,17 @@ function renderHistoryMessage(message) {
     return;
   }
 
+  if (!["chat", "dj_reply"].includes(message.kind || "chat")) return;
   els.chat.insertAdjacentHTML(
     "beforeend",
     `<div class="message dj history"><div class="avatar"></div><div><div class="speaker">CLAUDIO</div><div class="bubble">${escapeHtml(content)}</div></div></div>`
   );
+  if (message.kind === "dj_reply" && message.trackTitle) {
+    els.chat.insertAdjacentHTML(
+      "beforeend",
+      `<div class="track-card history"><strong>* ${escapeHtml(message.trackTitle)}</strong><span>${escapeHtml(message.trackArtist || "")}</span></div>`
+    );
+  }
 }
 
 function normalizeBubbleText(text) {

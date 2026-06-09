@@ -239,6 +239,10 @@ async function buildTrackIntro(env: Env, input: {
     `Listener/context: ${JSON.stringify({ name: profile.name, routine, context, memory: memorySummary(memory) })}`,
     `User message: ${message}`,
     `Lyric cues: ${lyricContext || "unavailable"}`,
+    "Silently extract three notes from lyric cues before writing: one concrete object/action, one emotional conflict, and one reason this song fits the listener now. Do not output the notes.",
+    "Do not summarize the song or explain what it is about. Open a small lived scene from the lyric evidence, then name artist/title once, then make one human turn.",
+    "Avoid generic radio-poetry defaults unless the lyric directly supports them: wind, room, light, night, silence, company, slowly, stay here, let it accompany you.",
+    "The copy should sound like a real late-night host who has listened to the song, not like a reading-comprehension answer or a motivational card.",
     mode === "handoff"
       ? "Write a natural handoff from previous song into this one. Do not use stock transition wording."
       : "Write a cold open before this song starts.",
@@ -418,6 +422,10 @@ async function answerTrackQuestion(env: Env, input: {
     `Long-term listener memory: ${JSON.stringify(memorySummary(input.memory))}`,
     `User question: ${input.message}`,
     `Lyric text excerpts: ${lyricContext || "unavailable"}`,
+    "First identify one concrete lyric image, one relationship/action, and one emotional contradiction. Use them silently as source material; do not list them.",
+    "Do not answer like a summary. Start from the image or action itself, then widen into an interpretation.",
+    "Avoid vague safe words unless you make them concrete: 陪伴, 治愈, 共鸣, 温柔, 安全感, 情绪, 日常, 空位, 关系.",
+    "Avoid repeating stock Claudio words unless the lyric requires them: 风, 夜, 房间, 光, 慢慢, 静默, 放空, 陪你.",
     "Answer in Chinese, 3-6 short sentences, warm, loose, and conversational, like a DJ talking quietly while the record is still turning.",
     "Base the answer on concrete images from lyric text excerpts when available. Use the user's currently playing lyric window as the most important evidence.",
     "Quote no more than one short phrase. Prefer paraphrase and vivid everyday scenes over abstract summary.",
