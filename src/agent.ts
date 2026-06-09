@@ -239,6 +239,23 @@ async function buildTrackIntro(env: Env, input: {
     `Listener/context: ${JSON.stringify({ name: profile.name, routine, context, memory: memorySummary(memory) })}`,
     `User message: ${message}`,
     `Lyric cues: ${lyricContext || "unavailable"}`,
+    mode === "opening"
+      ? [
+          "Opening-song format target:",
+          "Start with exactly: This is Claudio.",
+          "Then mention the real day/time in one quiet sentence if available from context.",
+          "Then introduce the exact artist/title as a song chosen for this moment.",
+          "Use lyric cues to create a concrete listening doorway: an object, gesture, or pressure in the song. Transform the cue; do not quote it mechanically.",
+          "If verified background is unavailable, do not fake history. Replace history with sonic/lyric observation: vocal distance, tempo, repeated image, emotional movement.",
+          "The target rhythm is like: This is Claudio. It's late on Monday. Here's a song that moves with your breath... this one's called If. After a long day, just breathe.",
+          "Do not say the opening is preparing, do not apologize, do not discuss syncing lyrics/audio, do not mention that you are an AI."
+        ].join("\n")
+      : [
+          "Non-opening format target:",
+          "Do not say 'This is Claudio'.",
+          "Carry a small emotional residue from the previous song, then turn naturally into the exact next artist/title.",
+          "Never say '先放', '接上', or any stock transition. Make it feel like a host continuing a thought."
+        ].join("\n"),
     "Silently extract three notes from lyric cues before writing: one concrete object/action, one emotional conflict, and one reason this song fits the listener now. Do not output the notes.",
     "Do not summarize the song or explain what it is about. Open a small lived scene from the lyric evidence, then name artist/title once, then make one human turn.",
     "Avoid generic radio-poetry defaults unless the lyric directly supports them: wind, room, light, night, silence, company, slowly, stay here, let it accompany you.",
@@ -341,6 +358,9 @@ async function refineDjIntro(env: Env, input: {
     `User message: ${input.message}`,
     `Lyric cues, use as meaning source but do not copy: ${input.lyricContext || "unavailable"}`,
     `Draft: ${input.draft}`,
+    input.mode === "opening"
+      ? "For the first song, keep a real Claudio opening arc: This is Claudio; time/day; why this exact song belongs before playback; one lyric-derived image turned into your own observation; a gentle landing line. Never mention preparation or technical state."
+      : "For later songs, make this a true handoff or response. Do not restart the station, do not say This is Claudio, and do not use stock transition phrases.",
     "Keep the concrete truth: exact artist/title and one feeling from the lyric cues.",
     "Delete machine phrases, analysis phrases, motivational slogans, and copied lyric strings.",
     "Do not say: 这首歌, 这首在讲, 大概在讲, 先放, 先听着, 不是着急, 我懂了, 这句话像, 这几个字, 歌词里, 意义, 标准答案, 慢慢进来, 接上来, 从这里进来, 从旁边进来, 歌进来, 声音进来, 放空一会儿, 隐秘, 静默, 回忆如风, 好.",

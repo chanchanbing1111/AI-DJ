@@ -30,7 +30,11 @@ const state = {
   autoSkipping: false,
   autoAdvancing: false,
   transportBusy: false,
+  playbackBusy: false,
   speakingBusy: false,
+  openingPromise: null,
+  openingReadyTrackKey: "",
+  openingStartedAt: 0,
   lastAutoAdvancedKey: "",
   recentTrackKeys: [],
   lastTranscriptWheelAt: 0,
@@ -43,6 +47,7 @@ const state = {
 
 const lyricCache = new Map();
 const rejectedTrackKeys = new Set();
+const ttsAudioCache = new Map();
 
 const els = {
   clock: document.querySelector("#clock"),
@@ -177,14 +182,9 @@ async function boot() {
   await hydrateMemorySettings();
   setupEvents();
   await hydrateChatHistory();
-  renderReply(startupReply(), false, { forceRender: true, silent: true });
+  renderOpeningShell();
   updatePlaybackButtons();
-
-  detectWeather()
-    .then(() => refreshPlan())
-    .catch((error) => pushDj(`Startup context failed: ${error.message}`, false));
-
-  refreshOpening();
+  state.openingPromise = prewarmOpening();
 }
 
 async function hydrateMemorySettings() {
@@ -324,34 +324,88 @@ function wantsMusicChange(message) {
   return /(\u5f00\u53f0|\u5f00\u59cb|\u5b89\u6392|\u64ad\u653e|\u653e|\u6765\u4e00\u9996|\u6362|\u4e0b\u4e00\u9996|\u63a8\u8350|\u627e|\u641c|\u6b4c|\u97f3\u4e50|similar|like this|new|discover|recommend|play|song|music)/i.test(text);
 }
 
-async function refreshOpening() {
+async function prewarmOpening() {
+  const requestStartedAt = Date.now();
+  state.openingStartedAt = requestStartedAt;
   try {
-    const reply = await withTimeout(ask("\u4eca\u5929\u6839\u636e\u5929\u6c14\u548c\u5fc3\u60c5\u5f00\u53f0", false), 90000);
+    await detectWeather();
+    await refreshPlan();
+  } catch (error) {
+    console.info("Startup context skipped:", error.message);
+  }
+
+  const reply = await refreshOpening({ silent: false });
+  if (state.openingStartedAt !== requestStartedAt) return null;
+  if (reply?.play) {
+    state.openingReadyTrackKey = trackKey(reply.play);
+    warmOpeningAssets(reply).catch(() => {});
+  }
+  return reply;
+}
+
+async function warmOpeningAssets(reply) {
+  const track = reply?.play;
+  const key = trackKey(track);
+  if (!track || !key || trackKey(state.reply?.play) !== key) return;
+  if (!track.url) await resolvePlayableUrl(track);
+  if (trackKey(state.reply?.play) !== key) return;
+  await getParsedLyrics(track).catch(() => []);
+  if (reply.say) prefetchTtsAudio(reply.say).catch(() => {});
+  if (trackKey(state.reply?.play) === key) syncPlaybackBindingForReplyTrack(track);
+}
+
+async function refreshOpening({ silent = false } = {}) {
+  try {
+    const reply = await withTimeout(ask(openingPromptMessage(), false), 90000);
     if (reply?.play && isResolvableTrack(reply.play)) {
       const wasPlaying = !els.player.paused;
       state.introducedTrackId = null;
-      renderReply(reply, false, { forceRender: true });
+      renderReply(reply, false, { forceRender: true, silent });
       if (wasPlaying) {
         playDjIntro({ resumeMusic: true, leadInMs: 250, mode: "auto" }).catch(() => {});
       }
+      return reply;
     } else if (reply?.say) {
-      pushDj(reply.say, false);
+      if (!silent) pushDj(reply.say, false);
+      return reply;
     }
   } catch (error) {
     console.info("AI opening skipped:", error.message);
   }
+  return null;
+}
+
+function openingPromptMessage() {
+  const now = new Date();
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const time = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const period = now.getHours() >= 22 ? "late night" : now.getHours() >= 18 ? "evening" : now.getHours() >= 12 ? "afternoon" : "morning";
+  return [
+    "今天根据天气、心情和歌单开台。",
+    `现在是 ${weekday} ${time}, ${period}.`,
+    "请先选定一首真正可播放、最好有歌词的歌，再写 Claudio 开场稿。",
+    "开场稿要像私人电台，不要像助手总结。"
+  ].join("\n");
 }
 
 function startupReply() {
   const track = pickStartupTrack();
   const mood = state.mood;
   return {
-    say: track ? localOpeningSay(track) : "先导入你的歌单，我再开始编排。",
+    say: "",
     play: track,
-    reason: "Local startup fallback from imported playlist.",
-    segue: "Load music first, then refine with AI.",
+    reason: "Startup shell while Claudio prepares the opening.",
+    segue: "Preparing generated opening.",
     context: { mood, weather: state.weather }
   };
+}
+
+function renderOpeningShell() {
+  const reply = startupReply();
+  renderReply(reply, false, { forceRender: true, silent: true });
+  if (reply.play) {
+    els.speakState.innerHTML = "<span></span> Preparing";
+  }
 }
 
 async function hydrateChatHistory() {
@@ -503,8 +557,15 @@ function renderBroadcast(reply) {
 
 async function togglePlayback() {
   if (!state.reply?.play) return;
+  if (state.playbackBusy) return;
   if (els.player.paused) {
-    await startCurrentTrack();
+    setPlaybackBusy(true);
+    try {
+      await waitForOpeningReady();
+      await startCurrentTrack();
+    } finally {
+      setPlaybackBusy(false);
+    }
     return;
   }
 
@@ -513,9 +574,32 @@ async function togglePlayback() {
 }
 
 function updatePlaybackButtons() {
+  if (state.playbackBusy) {
+    els.playBtn.textContent = "...";
+    els.broadcastPlay.textContent = "...";
+    els.playBtn.disabled = true;
+    els.broadcastPlay.disabled = true;
+    return;
+  }
   const label = els.player.paused || !els.player.currentSrc ? ">" : "II";
   els.playBtn.textContent = label;
   els.broadcastPlay.textContent = label;
+  els.playBtn.disabled = false;
+  els.broadcastPlay.disabled = false;
+}
+
+function setPlaybackBusy(active) {
+  state.playbackBusy = active;
+  updatePlaybackButtons();
+}
+
+async function waitForOpeningReady() {
+  if (!state.openingPromise) return;
+  if (state.reply?.say && trackKey(state.reply.play) === state.openingReadyTrackKey) return;
+  await Promise.race([
+    state.openingPromise.catch(() => null),
+    wait(12000)
+  ]);
 }
 
 function setTransportBusy(active, label = null) {
@@ -796,16 +880,14 @@ async function speakText(text, mode) {
 }
 
 async function playRemoteTts(text, speaker) {
-  const response = await fetch("/api/tts", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, lang: "zh", speaker })
-  });
-  if (!response.ok || !response.headers.get("content-type")?.includes("audio")) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(detail.slice(0, 180) || `HTTP ${response.status}`);
+  const voiceText = normalizeTtsText(text);
+  const voiceId = speaker || localStorage.getItem("aiDjTtsVoice") || "";
+  const cacheKey = ttsCacheKey(voiceText, voiceId);
+  let arrayBuffer = ttsAudioCache.get(cacheKey);
+  if (!arrayBuffer) {
+    arrayBuffer = await fetchTtsAudio(voiceText, voiceId);
+    ttsAudioCache.set(cacheKey, arrayBuffer.slice(0));
   }
-  const arrayBuffer = await response.arrayBuffer();
 
   if (ttsContext) {
     const audioBuffer = await ttsContext.decodeAudioData(arrayBuffer.slice(0));
@@ -821,7 +903,7 @@ async function playRemoteTts(text, speaker) {
     return;
   }
 
-  const blob = new Blob([arrayBuffer]);
+  const blob = new Blob([arrayBuffer.slice(0)]);
   const audio = new Audio(URL.createObjectURL(blob));
   audio.playsInline = true;
   state.ttsAudio = audio;
@@ -832,6 +914,33 @@ async function playRemoteTts(text, speaker) {
   });
   URL.revokeObjectURL(audio.src);
   state.ttsAudio = null;
+}
+
+async function prefetchTtsAudio(text, speaker = localStorage.getItem("aiDjTtsVoice") || undefined) {
+  const voiceText = normalizeTtsText(text);
+  if (!voiceText || localStorage.getItem("aiDjRemoteTts") === "0") return;
+  const voiceId = speaker || "";
+  const cacheKey = ttsCacheKey(voiceText, voiceId);
+  if (ttsAudioCache.has(cacheKey)) return;
+  const arrayBuffer = await fetchTtsAudio(voiceText, voiceId);
+  ttsAudioCache.set(cacheKey, arrayBuffer);
+}
+
+async function fetchTtsAudio(text, speaker) {
+  const response = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, lang: "zh", speaker })
+  });
+  if (!response.ok || !response.headers.get("content-type")?.includes("audio")) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail.slice(0, 180) || `HTTP ${response.status}`);
+  }
+  return response.arrayBuffer();
+}
+
+function ttsCacheKey(text, speaker) {
+  return `${speaker || "default"}:${text}`;
 }
 
 function normalizeTtsText(text) {
