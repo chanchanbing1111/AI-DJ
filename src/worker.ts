@@ -13,7 +13,7 @@ import {
 } from "./netease";
 import { chooseTrack, fallbackDjReply, pickRoutine } from "./persona";
 import { researchSong } from "./search";
-import { getNow, getProfile, getUserMemory, recordPlaybackEvent, saveNow, saveProfile, saveVoiceSetting } from "./state";
+import { getChatHistory, getNow, getProfile, getUserMemory, recordChatMessage, recordPlaybackEvent, saveNow, saveProfile, saveVoiceSetting } from "./state";
 import type { DjReply, Env, MoodContext, TasteProfile, Track } from "./types";
 
 const jsonHeaders = {
@@ -97,6 +97,10 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
     return json(await getUserMemory(env));
   }
 
+  if (request.method === "GET" && url.pathname === "/api/chat/history") {
+    return json({ messages: await getChatHistory(env, Number(url.searchParams.get("limit") ?? "50")) });
+  }
+
   if (request.method === "POST" && url.pathname === "/api/memory/voice") {
     const body = (await request.json()) as { voiceId?: string; speed?: number; pitch?: number };
     if (body.voiceId) await saveVoiceSetting(env, "voiceId", body.voiceId);
@@ -107,16 +111,31 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
 
   if (request.method === "POST" && url.pathname === "/api/chat") {
     const body = (await request.json()) as { message?: string; context?: MoodContext; current?: DjReply | null; currentLyricContext?: string };
+    const message = body.message ?? "What should I listen to now?";
     const profile = await getProfile(env);
     const memory = await getUserMemory(env);
     const hasClientCurrent = Object.prototype.hasOwnProperty.call(body, "current");
+    await recordChatMessage(env, {
+      role: "user",
+      content: message,
+      kind: "chat",
+      track: body.current?.play ?? null,
+      metadata: { context: body.context ?? {}, currentLyricContext: body.currentLyricContext ?? "" }
+    });
     const reply = await computeAgentReply(env, {
-      message: body.message ?? "What should I listen to now?",
+      message,
       context: body.context ?? {},
       profile,
       current: hasClientCurrent ? body.current ?? null : await getNow(env),
       currentLyricContext: body.currentLyricContext,
       memory
+    });
+    await recordChatMessage(env, {
+      role: "assistant",
+      content: reply.say,
+      kind: reply.intent === "chat" ? "chat" : "dj_reply",
+      track: reply.play,
+      metadata: { reason: reply.reason, segue: reply.segue, context: reply.context }
     });
     await saveNow(env, reply);
     return json(reply);
@@ -139,16 +158,24 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
     const body = (await request.json()) as { track?: Track | null; previousTrack?: Track | null; message?: string; context?: MoodContext; mode?: "opening" | "recommend" | "handoff" };
     const profile = await getProfile(env);
     const memory = await getUserMemory(env);
+    const say = await writeDjIntroForTrack(env, {
+      profile,
+      message: body.message ?? "自动接下一首，像深夜私人电台一样自然介绍。",
+      context: body.context ?? {},
+      track: body.track ?? null,
+      mode: body.mode ?? "recommend",
+      memory,
+      previousTrack: body.previousTrack ?? null
+    });
+    await recordChatMessage(env, {
+      role: "assistant",
+      content: say,
+      kind: body.mode === "handoff" ? "dj_handoff" : "dj_intro",
+      track: body.track ?? null,
+      metadata: { previousTrack: body.previousTrack ?? null, context: body.context ?? {} }
+    });
     return json({
-      say: await writeDjIntroForTrack(env, {
-        profile,
-        message: body.message ?? "自动接下一首，像深夜私人电台一样自然介绍。",
-        context: body.context ?? {},
-        track: body.track ?? null,
-        mode: body.mode ?? "recommend",
-        memory,
-        previousTrack: body.previousTrack ?? null
-      })
+      say
     });
   }
 

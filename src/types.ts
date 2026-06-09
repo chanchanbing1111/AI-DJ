@@ -99,3 +99,17 @@ export interface UserMemory {
     playedAt: string;
   }>;
 }
+
+export interface ChatHistoryMessage {
+  id: number;
+  role: "user" | "assistant" | "system";
+  kind: string;
+  content: string;
+  trackKey?: string;
+  trackTitle?: string;
+  trackArtist?: string;
+  trackSource?: string;
+  trackSourceId?: string;
+  metadata?: unknown;
+  createdAt: string;
+}

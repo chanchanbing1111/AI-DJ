@@ -1,5 +1,5 @@
 import { defaultProfile } from "./persona";
-import type { Env, TasteProfile, Track, UserMemory } from "./types";
+import type { ChatHistoryMessage, Env, TasteProfile, Track, UserMemory } from "./types";
 
 const PROFILE_KEY = "taste_profile";
 const NOW_KEY = "now_playing";
@@ -122,6 +122,67 @@ export async function saveVoiceSetting(env: Env, key: string, value: string): Pr
   await env.DB.prepare(
     "INSERT INTO voice_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP"
   ).bind(key, value).run();
+}
+
+export async function recordChatMessage(env: Env, input: {
+  role: "user" | "assistant" | "system";
+  content: string;
+  kind?: string;
+  track?: Track | null;
+  metadata?: unknown;
+}): Promise<void> {
+  const content = input.content.trim();
+  if (!content) return;
+  const track = input.track ?? null;
+  await env.DB.prepare(
+    `INSERT INTO chat_messages
+      (role, kind, content, track_key, track_title, track_artist, track_source, track_source_id, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    input.role,
+    input.kind ?? "chat",
+    content.slice(0, 4000),
+    track ? trackKey(track) : null,
+    track?.title ?? null,
+    track?.artist ?? null,
+    track?.source ?? null,
+    track?.sourceId ?? null,
+    input.metadata === undefined ? null : JSON.stringify(input.metadata)
+  ).run();
+}
+
+export async function getChatHistory(env: Env, limit = 50): Promise<ChatHistoryMessage[]> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
+  const rows = await env.DB.prepare(
+    `SELECT id, role, kind, content,
+      track_key AS trackKey,
+      track_title AS trackTitle,
+      track_artist AS trackArtist,
+      track_source AS trackSource,
+      track_source_id AS trackSourceId,
+      metadata,
+      created_at AS createdAt
+     FROM chat_messages
+     ORDER BY datetime(created_at) DESC, id DESC
+     LIMIT ?`
+  ).bind(safeLimit).all<{
+    id: number;
+    role: "user" | "assistant" | "system";
+    kind: string;
+    content: string;
+    trackKey?: string;
+    trackTitle?: string;
+    trackArtist?: string;
+    trackSource?: string;
+    trackSourceId?: string;
+    metadata?: string | null;
+    createdAt: string;
+  }>();
+
+  return (rows.results ?? []).reverse().map((row) => ({
+    ...row,
+    metadata: row.metadata ? parseMaybeJson(row.metadata) : undefined
+  }));
 }
 
 async function seedDefaultMemory(env: Env): Promise<void> {

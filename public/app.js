@@ -173,6 +173,7 @@ async function boot() {
   hydrateProfile();
   await hydrateMemorySettings();
   setupEvents();
+  await hydrateChatHistory();
   renderReply(startupReply(), false, { forceRender: true, silent: true });
 
   detectWeather()
@@ -325,6 +326,20 @@ function startupReply() {
     segue: "Load music first, then refine with AI.",
     context: { mood, weather: state.weather }
   };
+}
+
+async function hydrateChatHistory() {
+  try {
+    const history = await api("/api/chat/history?limit=50");
+    const messages = Array.isArray(history?.messages) ? history.messages : [];
+    if (!messages.length) return;
+    els.chat.innerHTML = "";
+    for (const message of messages) renderHistoryMessage(message);
+    state.lastDjBubbleText = "";
+    maybeScrollToLatest();
+  } catch {
+    // Chat history is nice to have; live radio should still boot without it.
+  }
 }
 
 function localOpeningSay(track) {
@@ -1254,6 +1269,23 @@ function pushDj(text, shouldScroll = true) {
     `<div class="message dj"><div class="avatar"></div><div><div class="speaker">CLAUDIO</div><div class="bubble">${escapeHtml(text)}</div></div></div>`
   );
   if (shouldScroll) maybeScrollToLatest();
+}
+
+function renderHistoryMessage(message) {
+  const content = String(message?.content || "").trim();
+  if (!content) return;
+  if (message.role === "user") {
+    els.chat.insertAdjacentHTML(
+      "beforeend",
+      `<div class="message user history"><div class="bubble">${escapeHtml(content)}</div><div class="avatar"></div></div>`
+    );
+    return;
+  }
+
+  els.chat.insertAdjacentHTML(
+    "beforeend",
+    `<div class="message dj history"><div class="avatar"></div><div><div class="speaker">CLAUDIO</div><div class="bubble">${escapeHtml(content)}</div></div></div>`
+  );
 }
 
 function normalizeBubbleText(text) {
