@@ -186,6 +186,11 @@ export async function getChatHistory(env: Env, limit = 50): Promise<ChatHistoryM
   }));
 }
 
+export async function clearChatHistory(env: Env): Promise<number> {
+  const result = await env.DB.prepare("DELETE FROM chat_messages").run();
+  return result.meta.changes ?? 0;
+}
+
 async function seedDefaultMemory(env: Env): Promise<void> {
   const existing = await env.DB.prepare("SELECT key FROM user_memory LIMIT 1").first();
   if (!existing) {

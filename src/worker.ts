@@ -13,7 +13,7 @@ import {
 } from "./netease";
 import { chooseTrack, fallbackDjReply, pickRoutine } from "./persona";
 import { researchSong } from "./search";
-import { getChatHistory, getNow, getProfile, getUserMemory, recordChatMessage, recordPlaybackEvent, saveNow, saveProfile, saveVoiceSetting } from "./state";
+import { clearChatHistory, getChatHistory, getNow, getProfile, getUserMemory, recordChatMessage, recordPlaybackEvent, saveNow, saveProfile, saveVoiceSetting } from "./state";
 import type { DjReply, Env, MoodContext, TasteProfile, Track } from "./types";
 
 const jsonHeaders = {
@@ -99,6 +99,10 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
 
   if (request.method === "GET" && url.pathname === "/api/chat/history") {
     return json({ messages: await getChatHistory(env, Number(url.searchParams.get("limit") ?? "50")) });
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/chat/history") {
+    return json({ ok: true, deleted: await clearChatHistory(env) });
   }
 
   if (request.method === "POST" && url.pathname === "/api/memory/voice") {

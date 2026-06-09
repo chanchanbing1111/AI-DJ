@@ -64,6 +64,7 @@ const els = {
   form: document.querySelector("#chatForm"),
   message: document.querySelector("#message"),
   chat: document.querySelector("#chat"),
+  clearChat: document.querySelector("#clearChat"),
   plan: document.querySelector("#plan"),
   queueCount: document.querySelector("#queueCount"),
   weatherLine: document.querySelector("#weatherLine"),
@@ -229,6 +230,7 @@ function setupEvents() {
     await playRecommendedNext();
   });
   els.voiceBtn.addEventListener("click", () => playDjIntro({ resumeMusic: !els.player.paused, mode: "manual" }));
+  els.clearChat?.addEventListener("click", clearChatHistory);
   document.querySelector(".brand").addEventListener("dblclick", () => els.profileDialog.showModal());
   els.loadNetease.addEventListener("click", loadNeteaseAccount);
   els.resolveNetease.addEventListener("click", resolveNeteasePlaylist);
@@ -339,6 +341,22 @@ async function hydrateChatHistory() {
     maybeScrollToLatest();
   } catch {
     // Chat history is nice to have; live radio should still boot without it.
+  }
+}
+
+async function clearChatHistory() {
+  const ok = window.confirm("\u6e05\u7a7a\u4e4b\u524d\u7684\u804a\u5929\u8bb0\u5f55\uff1f\u6b4c\u5355\u3001\u504f\u597d\u548c\u5f53\u524d\u64ad\u653e\u4e0d\u4f1a\u88ab\u5220\u3002");
+  if (!ok) return;
+  els.clearChat.disabled = true;
+  try {
+    await api("/api/chat/history", { method: "DELETE" });
+    els.chat.innerHTML = "";
+    state.lastDjBubbleText = "";
+    pushDj("\u804a\u5929\u8bb0\u5f55\u5df2\u6e05\u7a7a\u3002", true);
+  } catch (error) {
+    pushDj(`\u6e05\u7a7a\u5931\u8d25\uff1a${error.message}`, true);
+  } finally {
+    els.clearChat.disabled = false;
   }
 }
 
