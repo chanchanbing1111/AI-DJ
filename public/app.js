@@ -29,6 +29,8 @@ const state = {
   lyricClock: null,
   autoSkipping: false,
   autoAdvancing: false,
+  transportBusy: false,
+  speakingBusy: false,
   lastAutoAdvancedKey: "",
   recentTrackKeys: [],
   lastTranscriptWheelAt: 0,
@@ -176,6 +178,7 @@ async function boot() {
   setupEvents();
   await hydrateChatHistory();
   renderReply(startupReply(), false, { forceRender: true, silent: true });
+  updatePlaybackButtons();
 
   detectWeather()
     .then(() => refreshPlan())
@@ -226,10 +229,28 @@ function setupEvents() {
   els.playBtn.addEventListener("click", togglePlayback);
   els.broadcastPlay.addEventListener("click", togglePlayback);
   els.nextBtn.addEventListener("click", async () => {
+    if (state.transportBusy) return;
+    setTransportBusy(true, "...");
     state.introducedTrackId = null;
-    await playRecommendedNext();
+    try {
+      await playRecommendedNext();
+    } finally {
+      setTransportBusy(false);
+    }
   });
-  els.voiceBtn.addEventListener("click", () => playDjIntro({ resumeMusic: !els.player.paused, mode: "manual" }));
+  els.voiceBtn.addEventListener("click", async () => {
+    if (state.speakingBusy) return;
+    state.speakingBusy = true;
+    els.voiceBtn.disabled = true;
+    els.voiceBtn.textContent = "...";
+    try {
+      await playDjIntro({ resumeMusic: !els.player.paused, mode: "manual" });
+    } finally {
+      state.speakingBusy = false;
+      els.voiceBtn.disabled = false;
+      els.voiceBtn.textContent = "\u25c9";
+    }
+  });
   els.clearChat?.addEventListener("click", clearChatHistory);
   document.querySelector(".brand").addEventListener("dblclick", () => els.profileDialog.showModal());
   els.loadNetease.addEventListener("click", loadNeteaseAccount);
@@ -238,6 +259,9 @@ function setupEvents() {
   els.player.addEventListener("timeupdate", updateProgress);
   els.player.addEventListener("ended", handleTrackEnded);
   els.player.addEventListener("playing", syncCurrentTrackFromAudio);
+  els.player.addEventListener("play", updatePlaybackButtons);
+  els.player.addEventListener("pause", updatePlaybackButtons);
+  els.player.addEventListener("emptied", updatePlaybackButtons);
   els.player.addEventListener("loadedmetadata", () => {
     syncCurrentTrackFromAudio();
     updateBroadcastDuration();
@@ -361,7 +385,7 @@ async function clearChatHistory() {
 }
 
 function localOpeningSay(track) {
-  return `This is Claudio. ${track.artist}\u7684\u300a${track.title}\u300b\u7559\u5728\u8fd9\u91cc\u3002\u5982\u679c\u521a\u6253\u5f00\u9875\u9762\uff0c\u5148\u522b\u6025\u7740\u7ed9\u4eca\u5929\u4e0b\u7ed3\u8bba\uff1b\u8ba9\u8fd9\u9996\u6b4c\u628a\u5468\u56f4\u7684\u566a\u58f0\u5411\u540e\u63a8\u4e00\u70b9\uff0c\u628a\u4f60\u5e26\u5230\u6bd4\u521a\u624d\u66f4\u80fd\u542c\u89c1\u81ea\u5df1\u7684\u4f4d\u7f6e\u3002`;
+  return `This is Claudio. \u5f00\u573a\u4e0d\u8d76\u65f6\u95f4\uff0c\u53ea\u5148\u628a\u7b2c\u4e00\u9996\u6b4c\u6446\u597d\uff1a${track.artist}\u7684\u300a${track.title}\u300b\u3002\u7b49\u6b4c\u8bcd\u548c\u58f0\u97f3\u771f\u6b63\u5bf9\u4e0a\uff0c\u6211\u518d\u628a\u8fd9\u4e00\u6bb5\u8bf4\u5f97\u66f4\u51c6\u3002\u73b0\u5728\u5148\u8ba9\u5b83\u505a\u4e00\u4e2a\u5165\u53e3\uff0c\u4e0d\u662f\u7ed3\u8bba\u3002`;
   return `This is Claudio。先把频道打开。今天不用一上来就解释自己，桌面、窗外和耳机都留一点余地。${track.artist}的《${track.title}》。如果早上的心还没完全醒，就让这首歌先替你把周围的声音隔开一点。`;
 }
 
@@ -440,7 +464,7 @@ function renderReply(reply, shouldScroll = true, options = {}) {
   els.meta.textContent = track ? `${track.artist} - PLAYING` : "WAITING";
   renderBroadcast(reply);
 
-  if (reply.say && !options.silent && !options.autoPlay) pushDj(reply.say, shouldScroll);
+  if (reply.say && !options.silent) pushDj(reply.say, shouldScroll);
   if (track) {
     if (track.url && !currentPlaybackTrack()) {
       bindAudioTrack(track);
@@ -472,8 +496,20 @@ async function togglePlayback() {
   }
 
   els.player.pause();
-  els.playBtn.textContent = ">";
-  els.broadcastPlay.textContent = ">";
+  updatePlaybackButtons();
+}
+
+function updatePlaybackButtons() {
+  const label = els.player.paused || !els.player.currentSrc ? ">" : "II";
+  els.playBtn.textContent = label;
+  els.broadcastPlay.textContent = label;
+}
+
+function setTransportBusy(active, label = null) {
+  state.transportBusy = active;
+  els.nextBtn.disabled = active;
+  if (label) els.nextBtn.textContent = label;
+  else els.nextBtn.textContent = ">";
 }
 
 async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) {
@@ -526,9 +562,6 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
   const played = await playMusic(track, sessionId);
   if (!played || !isActivePlaybackSession(sessionId, track)) return;
 
-  if (announce && state.reply?.say) {
-    pushDj(state.reply.say, shouldScroll);
-  }
   if (state.introducedTrackId !== track.id) {
     playDjIntro({ track, text: state.reply?.say ?? "", sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
   }
@@ -641,8 +674,7 @@ async function playMusic(track = state.reply?.play, sessionId = state.playSessio
     state.lastAutoAdvancedKey = "";
     rememberPlayedTrack(track);
     syncCurrentTrackFromAudio();
-    els.playBtn.textContent = "II";
-    els.broadcastPlay.textContent = "II";
+    updatePlaybackButtons();
     loadLyrics(track, sessionId).catch(() => {});
     reportPlaybackEvent("play", track, state.reply?.reason);
     return true;
@@ -1459,7 +1491,6 @@ async function hydrateAutoSegue(candidate, current, options = {}) {
   state.reply.say = intro;
   state.djText = intro;
   if (state.transcriptMode === "dj") renderBroadcast(state.reply);
-  pushDj(intro, true);
 }
 
 async function lyricPreviewLines(track) {
