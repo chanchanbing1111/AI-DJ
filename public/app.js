@@ -329,10 +329,16 @@ function wantsMusicChangeLegacy(message) {
   return /(开台|开始|安排|播放|放|来一首|换|下一首|推荐|找|搜|歌|音乐|similar|like this|new|discover|recommend|play|song|music)/i.test(text);
 }
 
+function isTrackQuestion(message) {
+  const text = String(message || "").trim();
+  return /(这首|这歌|这首歌|当前|正在放).*(讲什么|讲的什么|讲的是啥|什么意思|啥意思|唱什么|说什么|歌词|背景|介绍|含义|表达)|讲什么的|讲的什么|讲的是啥|啥意思|什么意思|介绍一下这首|解释一下/i.test(text);
+}
+
 function wantsMusicChange(message) {
   const text = String(message || "").trim();
   if (!text) return false;
-  return /(\u5f00\u53f0|\u5f00\u59cb|\u5b89\u6392|\u64ad\u653e|\u653e|\u6765\u4e00\u9996|\u6362|\u4e0b\u4e00\u9996|\u63a8\u8350|\u627e|\u641c|\u6b4c|\u97f3\u4e50|similar|like this|new|discover|recommend|play|song|music)/i.test(text);
+  if (isTrackQuestion(text)) return false;
+  return /(\u5f00\u53f0|\u5f00\u59cb|\u5b89\u6392|\u64ad\u653e|\u653e\u6b4c|\u653e\u97f3\u4e50|\u6765\u4e00\u9996|\u6362\u4e00\u9996|\u6362\u9996|\u6362\u6b4c|\u4e0b\u4e00\u9996|\u8df3\u8fc7|\u63a8\u8350|\u627e\u6b4c|\u641c\u6b4c|\u70b9\u6b4c|similar|like this|new|discover|recommend|play|song|music)/i.test(text);
 }
 
 async function prewarmOpening() {
@@ -367,7 +373,7 @@ async function warmOpeningAssets(reply) {
 
 async function refreshOpening({ silent = false, requestStartedAt = state.openingStartedAt } = {}) {
   try {
-    const reply = await withTimeout(ask(openingPromptMessage(), false, { persist: false }), 90000);
+    const reply = await withTimeout(askWithOptions(openingPromptMessage(), { shouldPush: false, persist: false }), 90000);
     if (state.openingStartedAt !== requestStartedAt) return null;
     if (reply?.play && isResolvableTrack(reply.play)) {
       const wasPlaying = !els.player.paused;
@@ -508,8 +514,8 @@ async function refreshPlan() {
   renderPlan();
 }
 
-async function ask(message, shouldPush = true) {
-  return askWithOptions(message, { shouldPush });
+async function ask(message, shouldPush = true, options = {}) {
+  return askWithOptions(message, { shouldPush, ...options });
 }
 
 async function askWithOptions(message, { shouldPush = true, persist = true } = {}) {
@@ -683,8 +689,37 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
   if (!played || !isActivePlaybackSession(sessionId, track)) return;
 
   if (state.introducedTrackId !== track.id) {
-    playDjIntro({ track, text: state.reply?.say ?? "", sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
+    const introText = state.reply?.say || await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 9000 });
+    playDjIntro({ track, text: introText, sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
   }
+}
+
+async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 9000 } = {}) {
+  if (!track) return "";
+  if (state.reply?.say && trackKey(state.reply.play) === trackKey(track)) return state.reply.say;
+  try {
+    const intro = await withTimeout(api("/api/dj/intro", {
+      method: "POST",
+      body: {
+        track,
+        previousTrack: null,
+        mode,
+        message: mode === "opening"
+          ? "为当前已经选定的第一首歌补一段 Claudio 开场。不要提准备、同步、技术状态。"
+          : "为当前歌曲补一段简短自然的私人电台介绍。",
+        context: { mood: state.mood, weather: state.weather }
+      }
+    }), timeoutMs);
+    if (intro?.say && trackKey(state.reply?.play) === trackKey(track)) {
+      state.reply.say = intro.say;
+      state.djText = intro.say;
+      if (state.transcriptMode === "dj") renderBroadcast(state.reply);
+      return intro.say;
+    }
+  } catch {
+    // If the model is slow, use a short local line instead of losing the DJ voice entirely.
+  }
+  return `This is Claudio。${track.artist}的《${track.title}》。先让这首歌把频道接住。`;
 }
 
 async function resolvePlayableUrl(track, { applyToPlayer = true } = {}) {
@@ -1522,7 +1557,7 @@ function renderTrackCard(track, shouldScroll = true) {
 
 async function playRecommendedNext(options = {}) {
   const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
-  if (!options.reason) {
+  if (options.reason !== "ended") {
     const immediate = pickQuickNextTrack(current);
     if (immediate) {
       const say = quickAutoSegue(immediate, current, options);
