@@ -114,18 +114,21 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
   }
 
   if (request.method === "POST" && url.pathname === "/api/chat") {
-    const body = (await request.json()) as { message?: string; context?: MoodContext; current?: DjReply | null; currentLyricContext?: string };
+    const body = (await request.json()) as { message?: string; context?: MoodContext; current?: DjReply | null; currentLyricContext?: string; persist?: boolean };
     const message = body.message ?? "What should I listen to now?";
     const profile = await getProfile(env);
     const memory = await getUserMemory(env);
     const hasClientCurrent = Object.prototype.hasOwnProperty.call(body, "current");
-    await recordChatMessage(env, {
-      role: "user",
-      content: message,
-      kind: "chat",
-      track: body.current?.play ?? null,
-      metadata: { context: body.context ?? {}, currentLyricContext: body.currentLyricContext ?? "" }
-    });
+    const shouldPersist = body.persist !== false;
+    if (shouldPersist) {
+      await recordChatMessage(env, {
+        role: "user",
+        content: message,
+        kind: "chat",
+        track: body.current?.play ?? null,
+        metadata: { context: body.context ?? {}, currentLyricContext: body.currentLyricContext ?? "" }
+      });
+    }
     const reply = await computeAgentReply(env, {
       message,
       context: body.context ?? {},
@@ -134,13 +137,15 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
       currentLyricContext: body.currentLyricContext,
       memory
     });
-    await recordChatMessage(env, {
-      role: "assistant",
-      content: reply.say,
-      kind: reply.intent === "chat" ? "chat" : "dj_reply",
-      track: reply.play,
-      metadata: { reason: reply.reason, segue: reply.segue, context: reply.context }
-    });
+    if (shouldPersist) {
+      await recordChatMessage(env, {
+        role: "assistant",
+        content: reply.say,
+        kind: reply.intent === "chat" ? "chat" : "dj_reply",
+        track: reply.play,
+        metadata: { reason: reply.reason, segue: reply.segue, context: reply.context }
+      });
+    }
     await saveNow(env, reply);
     return json(reply);
   }

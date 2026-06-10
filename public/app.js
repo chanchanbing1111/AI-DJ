@@ -212,7 +212,17 @@ function setupEvents() {
     if (!message) return;
     els.message.value = "";
     pushUser(message);
-    renderReply(await ask(message, false), true, { autoPlay: wantsMusicChange(message) });
+    if (wantsMusicChange(message)) {
+      invalidateOpeningPrewarm();
+      setTransportBusy(true, "...");
+      try {
+        await playRecommendedNext({ reason: "chat", userMessage: message });
+      } finally {
+        setTransportBusy(false);
+      }
+      return;
+    }
+    renderReply(await askWithOptions(message, { shouldPush: false }), true, { autoPlay: false });
   });
 
   document.querySelectorAll("[data-mood]").forEach((button) => {
@@ -231,6 +241,7 @@ function setupEvents() {
   els.nextBtn.addEventListener("click", async () => {
     if (state.transportBusy) return;
     setTransportBusy(true, "...");
+    invalidateOpeningPrewarm();
     state.introducedTrackId = null;
     try {
       await playRecommendedNext();
@@ -334,7 +345,7 @@ async function prewarmOpening() {
     console.info("Startup context skipped:", error.message);
   }
 
-  const reply = await refreshOpening({ silent: false });
+  const reply = await refreshOpening({ silent: false, requestStartedAt });
   if (state.openingStartedAt !== requestStartedAt) return null;
   if (reply?.play) {
     state.openingReadyTrackKey = trackKey(reply.play);
@@ -354,9 +365,10 @@ async function warmOpeningAssets(reply) {
   if (trackKey(state.reply?.play) === key) syncPlaybackBindingForReplyTrack(track);
 }
 
-async function refreshOpening({ silent = false } = {}) {
+async function refreshOpening({ silent = false, requestStartedAt = state.openingStartedAt } = {}) {
   try {
-    const reply = await withTimeout(ask(openingPromptMessage(), false), 90000);
+    const reply = await withTimeout(ask(openingPromptMessage(), false, { persist: false }), 90000);
+    if (state.openingStartedAt !== requestStartedAt) return null;
     if (reply?.play && isResolvableTrack(reply.play)) {
       const wasPlaying = !els.player.paused;
       state.introducedTrackId = null;
@@ -406,6 +418,12 @@ function renderOpeningShell() {
   if (reply.play) {
     els.speakState.innerHTML = "<span></span> Preparing";
   }
+}
+
+function invalidateOpeningPrewarm() {
+  state.openingStartedAt = Date.now();
+  state.openingPromise = null;
+  state.openingReadyTrackKey = "";
 }
 
 async function hydrateChatHistory() {
@@ -491,11 +509,16 @@ async function refreshPlan() {
 }
 
 async function ask(message, shouldPush = true) {
+  return askWithOptions(message, { shouldPush });
+}
+
+async function askWithOptions(message, { shouldPush = true, persist = true } = {}) {
   if (shouldPush) pushUser(message);
   return api("/api/chat", {
     method: "POST",
     body: {
       message,
+      persist,
       current: currentReplyForChat(),
       currentLyricContext: currentLyricContext(),
       context: {
@@ -708,7 +731,9 @@ async function findNextPlayableTrack(current) {
       if (avoidRecent && isRecentlyPlayed(candidateKey)) continue;
 
       const candidate = { ...track };
-      if (await resolvePlayableUrl(candidate, { applyToPlayer: false }) && await hasUsableLyrics(candidate)) return candidate;
+      if (!await resolvePlayableUrl(candidate, { applyToPlayer: false })) continue;
+      hasUsableLyrics(candidate).catch(() => false);
+      return candidate;
     }
   }
 
@@ -1593,9 +1618,9 @@ function pickQuickNextTrack(current) {
   const currentKey = trackKey(current);
   const candidates = tracks.filter((track) => {
     const key = trackKey(track);
-    return key && key !== currentKey && !isRecentlyPlayed(key) && !rejectedTrackKeys.has(key);
+    return key && key !== currentKey && isResolvableTrack(track) && !isRecentlyPlayed(key) && !rejectedTrackKeys.has(key);
   });
-  const pool = candidates.length ? candidates : tracks.filter((track) => trackKey(track) !== currentKey);
+  const pool = candidates.length ? candidates : tracks.filter((track) => trackKey(track) !== currentKey && isResolvableTrack(track));
   if (!pool.length) return null;
   const seed = Math.abs(hash(`${currentKey}:${Date.now()}:${state.recentTrackKeys.join("|")}`));
   return { ...pool[seed % pool.length] };

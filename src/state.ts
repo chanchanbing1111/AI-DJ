@@ -162,10 +162,14 @@ export async function getChatHistory(env: Env, limit = 50): Promise<ChatHistoryM
       track_source_id AS trackSourceId,
       metadata,
       created_at AS createdAt
-     FROM chat_messages
-     WHERE kind IN ('chat', 'dj_reply')
-     ORDER BY datetime(created_at) DESC, id DESC
-     LIMIT ?`
+       FROM chat_messages
+       WHERE kind IN ('chat', 'dj_reply')
+         AND NOT (
+           role = 'user'
+           AND content LIKE '今天根据天气、心情和歌单开台。%'
+         )
+       ORDER BY datetime(created_at) DESC, id DESC
+       LIMIT ?`
   ).bind(safeLimit).all<{
     id: number;
     role: "user" | "assistant" | "system";
