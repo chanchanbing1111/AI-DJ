@@ -747,10 +747,35 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
   const played = await playMusic(track, sessionId);
   if (!played || !isActivePlaybackSession(sessionId, track)) return;
 
-  if (state.introducedTrackId !== track.id && !state.reply?.introPending) {
-    const introText = state.reply?.say || await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 9000 });
-    playDjIntro({ track, text: introText, sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
+  if (state.introducedTrackId !== track.id) {
+    if (state.reply?.say && !state.reply?.introPending) {
+      playDjIntro({ track, text: state.reply.say, sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
+    } else {
+      hydrateIntroForPlayingTrack(track, { mode: "opening", sessionId, shouldPush: true }).catch(() => {});
+    }
   }
+}
+
+async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId = state.playSessionId, shouldPush = true } = {}) {
+  const key = trackKey(track);
+  if (!track || !key) return "";
+  if (state.reply) {
+    state.reply.introPending = true;
+    renderBroadcast(state.reply);
+  }
+  const text = await ensureIntroTextForTrack(track, { mode, timeoutMs: 18000 });
+  if (!text || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return "";
+  if (state.reply) {
+    state.reply.say = text;
+    state.reply.introPending = false;
+  }
+  state.djText = text;
+  renderBroadcast(state.reply);
+  if (shouldPush) pushDj(text, true);
+  if (state.introducedTrackId !== track.id) {
+    playDjIntro({ track, text, sessionId, resumeMusic: false, leadInMs: 150, mode: "auto" }).catch(() => {});
+  }
+  return text;
 }
 
 async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 9000 } = {}) {
@@ -778,7 +803,12 @@ async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 
   } catch {
     // If the model is slow, use a short local line instead of losing the DJ voice entirely.
   }
-  return `This is Claudio。${track.artist}的《${track.title}》。先让这首歌把频道接住。`;
+  const lines = await lyricPreviewLines(track);
+  const anchor = pickAutoAnchorLine(lines, track.title);
+  const handoff = mode === "opening"
+    ? `This is Claudio。${track.artist}的《${track.title}》。`
+    : `${track.artist}的《${track.title}》。`;
+  return buildLocalDjFallback({ handoff, lines, anchor, track });
 }
 
 async function resolvePlayableUrl(track, { applyToPlayer = true } = {}) {
@@ -1700,10 +1730,24 @@ async function buildAutoSegue(candidate, current, options = {}) {
   if (/倔强/.test(candidate.title) && candidate.artist?.includes("五月天")) {
     return `${handoff}借它一点硬气，不是冲出去赢谁，是别把心里那块还亮着的地方交出去。`;
   }
-  if (anchor) {
-    return `${handoff}我只抓一个小细节：${anchor.slice(0, 18)}。剩下的，让你自己听见。`;
+  return buildLocalDjFallback({ handoff, lines, anchor, track: candidate });
+}
+
+function buildLocalDjFallback({ handoff, lines = [], anchor = "", track }) {
+  const images = lines
+    .filter((line) => line && line !== anchor)
+    .filter((line) => line.length >= 4 && line.length <= 18)
+    .filter((line) => !isLyricCredit(line))
+    .slice(0, 3);
+  const detail = anchor || images[0] || "";
+  const second = images.find((line) => line !== detail) || "";
+  if (detail && second) {
+    return `${handoff}${detail}，${second}，这些词不用被解释得太满。它们更像一盏灯忽明忽暗，照出人心里那块还没整理好的地方。你先跟着它走一会儿，别急着把感受收起来。`;
   }
-  return `${handoff}这一段不急着定义，留给耳朵自己判断。`;
+  if (detail) {
+    return `${handoff}${detail}这句先留在空气里。它不负责把答案说完，只把门推开一点，让你听见自己心里正在回声的部分。`;
+  }
+  return `${handoff}我先不替它下定义。让旋律自己铺开，等第一段人声出来，你会知道这首歌想把你带到哪里。`;
 }
 
 function pickQuickNextTrack(current) {
