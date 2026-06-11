@@ -580,7 +580,7 @@ function renderBroadcast(reply) {
   els.broadcastMeta.textContent = track ? `${track.title} - ${track.artist}` : "Waiting for track";
   updateBroadcastDuration();
   els.speakTimer.textContent = "0:00";
-  els.speakState.innerHTML = "<span></span> Ready";
+  els.speakState.innerHTML = reply.introPending ? "<span></span> Writing" : "<span></span> Ready";
   renderDjTranscript(reply.say);
 }
 
@@ -688,7 +688,7 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
   const played = await playMusic(track, sessionId);
   if (!played || !isActivePlaybackSession(sessionId, track)) return;
 
-  if (state.introducedTrackId !== track.id) {
+  if (state.introducedTrackId !== track.id && !state.reply?.introPending) {
     const introText = state.reply?.say || await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 9000 });
     playDjIntro({ track, text: introText, sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
   }
@@ -1560,10 +1560,10 @@ async function playRecommendedNext(options = {}) {
   if (options.reason !== "ended") {
     const immediate = pickQuickNextTrack(current);
     if (immediate) {
-      const say = quickAutoSegue(immediate, current, options);
       renderReply({
-        say,
+        say: "",
         play: immediate,
+        introPending: true,
         reason: "用户手动切歌，先从本地歌单即时响应。",
         segue: "先播放，再补完整过渡。",
         context: { mood: state.mood, weather: state.weather }
@@ -1575,10 +1575,10 @@ async function playRecommendedNext(options = {}) {
 
   const candidate = await getRecommendedTrack(current);
   if (candidate) {
-    const say = quickAutoSegue(candidate, current, options);
     renderReply({
-      say,
+      say: "",
       play: candidate,
+      introPending: true,
       reason: "根据当前歌曲的网易云相似歌曲或每日推荐扩展。",
       segue: "顺着相近的情绪继续走。",
       context: { mood: state.mood, weather: state.weather }
@@ -1589,10 +1589,10 @@ async function playRecommendedNext(options = {}) {
 
   const alternate = await findNextPlayableTrack(current);
   if (alternate) {
-    const say = quickAutoSegue(alternate, current, options);
     renderReply({
-      say,
+      say: "",
       play: alternate,
+      introPending: true,
       reason: "从本地歌单避开最近播放后接续。",
       segue: "换一条不重复的线。",
       context: { mood: state.mood, weather: state.weather }
@@ -1606,7 +1606,7 @@ async function playRecommendedNext(options = {}) {
 
 async function buildAutoSegue(candidate, current, options = {}) {
   try {
-    const intro = await api("/api/dj/intro", {
+    const intro = await withTimeout(api("/api/dj/intro", {
       method: "POST",
       body: {
         track: candidate,
@@ -1617,7 +1617,7 @@ async function buildAutoSegue(candidate, current, options = {}) {
           : `用户要换一首。请像 Claudio 深夜私人电台一样自然过渡到下一首，不要说“先放”、不要说“这首在讲”、不要解释意义。`,
         context: { mood: state.mood, weather: state.weather }
       }
-    });
+    }), 12000);
     if (intro?.say) return intro.say;
   } catch {
     // Fall back to a local segue if the LLM endpoint is unavailable.
@@ -1642,7 +1642,7 @@ async function buildAutoSegue(candidate, current, options = {}) {
     return `${handoff}借它一点硬气，不是冲出去赢谁，是别把心里那块还亮着的地方交出去。`;
   }
   if (anchor) {
-    return `${handoff}我只抓一个小细节：${anchor.text.slice(0, 18)}。剩下的，让你自己听见。`;
+    return `${handoff}我只抓一个小细节：${anchor.slice(0, 18)}。剩下的，让你自己听见。`;
   }
   return `${handoff}这一段不急着定义，留给耳朵自己判断。`;
 }
@@ -1671,8 +1671,21 @@ async function hydrateAutoSegue(candidate, current, options = {}) {
   const intro = await withTimeout(buildAutoSegue(candidate, current, options), 18000);
   if (!intro || trackKey(state.reply?.play) !== trackKey(candidate)) return;
   state.reply.say = intro;
+  state.reply.introPending = false;
   state.djText = intro;
-  if (state.transcriptMode === "dj") renderBroadcast(state.reply);
+  renderBroadcast(state.reply);
+  pushDj(intro, true);
+  const activeTrack = currentPlaybackTrack() ?? state.currentTrack;
+  if (trackKey(activeTrack) === trackKey(candidate) && state.introducedTrackId !== candidate.id) {
+    playDjIntro({
+      track: candidate,
+      text: intro,
+      sessionId: state.playSessionId,
+      resumeMusic: false,
+      leadInMs: 150,
+      mode: "auto"
+    }).catch(() => {});
+  }
 }
 
 async function lyricPreviewLines(track) {
