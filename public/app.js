@@ -351,6 +351,9 @@ async function prewarmOpening() {
     console.info("Startup context skipped:", error.message);
   }
 
+  const prepared = await prepareOpeningIntroForCurrentTrack(requestStartedAt);
+  if (prepared) return prepared;
+
   const reply = await refreshOpening({ silent: false, requestStartedAt });
   if (state.openingStartedAt !== requestStartedAt) return null;
   if (reply?.play) {
@@ -358,6 +361,61 @@ async function prewarmOpening() {
     warmOpeningAssets(reply).catch(() => {});
   }
   return reply;
+}
+
+async function prepareOpeningIntroForCurrentTrack(requestStartedAt) {
+  let track = state.reply?.play ?? pickStartupTrack();
+  if (!track) return null;
+  let key = trackKey(track);
+  if (!key) return null;
+
+  if (trackKey(state.reply?.play) !== key) {
+    renderReply({
+      say: "",
+      play: track,
+      introPending: true,
+      reason: "Startup opening is being prepared for the selected track.",
+      segue: "Prepare Claudio opening before playback.",
+      context: { mood: state.mood, weather: state.weather }
+    }, false, { forceRender: true, silent: true });
+  } else if (state.reply) {
+    state.reply.introPending = true;
+    renderBroadcast(state.reply);
+  }
+
+  await resolvePlayableUrl(track).catch(() => false);
+  if (state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
+
+  const lyrics = await getParsedLyrics(track).catch(() => []);
+  if (!lyrics.length) {
+    const alternate = await findNextPlayableTrack(track);
+    if (alternate && state.openingStartedAt === requestStartedAt) {
+      track = alternate;
+      key = trackKey(track);
+      renderReply({
+        say: "",
+        play: track,
+        introPending: true,
+        reason: "Startup skipped a track without usable lyrics.",
+        segue: "Prepare opening with lyrics.",
+        context: { mood: state.mood, weather: state.weather }
+      }, false, { forceRender: true, silent: true });
+      await resolvePlayableUrl(track).catch(() => false);
+      await getParsedLyrics(track).catch(() => []);
+    }
+  }
+
+  if (state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
+  const say = await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 18000 });
+  if (!say || state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
+
+  state.reply.say = say;
+  state.reply.introPending = false;
+  state.openingReadyTrackKey = key;
+  renderBroadcast(state.reply);
+  pushDj(say, false);
+  warmOpeningAssets(state.reply).catch(() => {});
+  return state.reply;
 }
 
 async function warmOpeningAssets(reply) {
@@ -412,6 +470,7 @@ function startupReply() {
   return {
     say: "",
     play: track,
+    introPending: true,
     reason: "Startup shell while Claudio prepares the opening.",
     segue: "Preparing generated opening.",
     context: { mood, weather: state.weather }
