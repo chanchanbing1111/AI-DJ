@@ -35,6 +35,7 @@ const state = {
   openingPromise: null,
   openingReadyTrackKey: "",
   openingStartedAt: 0,
+  introRequestId: 0,
   lastAutoAdvancedKey: "",
   recentTrackKeys: [],
   lastTranscriptWheelAt: 0,
@@ -406,14 +407,14 @@ async function prepareOpeningIntroForCurrentTrack(requestStartedAt) {
   }
 
   if (state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
+  const introRequestId = ++state.introRequestId;
   const say = await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 18000 });
-  if (!say || state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
+  if (!say || introRequestId !== state.introRequestId || state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
 
   state.reply.say = say;
   state.reply.introPending = false;
   state.openingReadyTrackKey = key;
   renderBroadcast(state.reply);
-  pushDj(say, false);
   warmOpeningAssets(state.reply).catch(() => {});
   return state.reply;
 }
@@ -749,6 +750,7 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
 
   if (state.introducedTrackId !== track.id) {
     if (state.reply?.say && !state.reply?.introPending) {
+      pushDj(state.reply.say, shouldScroll);
       playDjIntro({ track, text: state.reply.say, sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
     } else {
       hydrateIntroForPlayingTrack(track, { mode: "opening", sessionId, shouldPush: true }).catch(() => {});
@@ -759,12 +761,13 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
 async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId = state.playSessionId, shouldPush = true } = {}) {
   const key = trackKey(track);
   if (!track || !key) return "";
+  const introRequestId = ++state.introRequestId;
   if (state.reply) {
     state.reply.introPending = true;
     renderBroadcast(state.reply);
   }
   const text = await ensureIntroTextForTrack(track, { mode, timeoutMs: 18000 });
-  if (!text || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return "";
+  if (!text || introRequestId !== state.introRequestId || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return "";
   if (state.reply) {
     state.reply.say = text;
     state.reply.introPending = false;
@@ -1645,6 +1648,8 @@ function renderTrackCard(track, shouldScroll = true) {
 }
 
 async function playRecommendedNext(options = {}) {
+  invalidateOpeningPrewarm();
+  state.introRequestId++;
   const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
   if (options.reason !== "ended") {
     const immediate = pickQuickNextTrack(current);
@@ -1771,8 +1776,9 @@ function quickAutoSegue(candidate, current, options = {}) {
 }
 
 async function hydrateAutoSegue(candidate, current, options = {}) {
+  const introRequestId = ++state.introRequestId;
   const intro = await withTimeout(buildAutoSegue(candidate, current, options), 18000);
-  if (!intro || trackKey(state.reply?.play) !== trackKey(candidate)) return;
+  if (!intro || introRequestId !== state.introRequestId || trackKey(state.reply?.play) !== trackKey(candidate)) return;
   state.reply.say = intro;
   state.reply.introPending = false;
   state.djText = intro;
