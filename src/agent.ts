@@ -466,9 +466,11 @@ async function answerTrackQuestion(env: Env, input: {
     "Return strict JSON only: {\"say\":\"...\"}.",
     `Listener name: ${input.profile.name}`,
     `Current track: ${JSON.stringify({ title: input.track.title, artist: input.track.artist, album: input.track.album, background: input.track.background })}`,
-    `Long-term listener memory: ${JSON.stringify(memorySummary(input.memory))}`,
+    `Listener preference memory, not playback history: ${JSON.stringify({ preferences: input.memory?.preferences ?? {}, blockedPhrases: input.memory?.blockedPhrases?.slice(0, 24) ?? [] })}`,
     `User question: ${input.message}`,
     `Lyric text excerpts: ${lyricContext || "unavailable"}`,
+    "Accuracy rules: do not mention whether the song was played before, how many times it played, or what happened earlier in the session. Do not infer taste/smell/touch from the title unless the lyrics explicitly say it.",
+    "If you cannot support a detail with the lyric excerpts, title, artist, or provided background, leave it out.",
     "First identify one concrete lyric image, one relationship/action, and one emotional contradiction. Use them silently as source material; do not list them.",
     "Do not answer like a summary. Start from the image or action itself, then widen into an interpretation.",
     "Avoid vague safe words unless you make them concrete: 陪伴, 治愈, 共鸣, 温柔, 安全感, 情绪, 日常, 空位, 关系.",
@@ -482,7 +484,7 @@ async function answerTrackQuestion(env: Env, input: {
     "Shape the answer like a mini radio monologue: start with one room/time image, touch one lyric cue, widen into the listener's life, then land softly.",
     "A good answer may wander a little: connect the lyric to a real-life scene, then come back to the song. It should feel discovered, not prewritten.",
     "If lyrics are unavailable or only credits, say you don't have enough lyrics and explain only from title/artist, without pretending.",
-    "Do not invent creation background, interviews, dates, or songwriter intent.",
+    "Do not invent creation background, interviews, dates, songwriter intent, playback history, or listener history.",
     "If you are making an inference from lyrics, phrase it as an interpretation rather than a fact about the artist.",
     "Avoid stiff summary words unless you make them specific: 安全感, 陪伴, 治愈, 共鸣, 情绪, 日常, 归属, 空位, 关系.",
     "Do not use stiff phrases: 情绪不是直给, 稳住状态, 把呼吸放稳, 先不用讲太满, 听到哪里算哪里, 模式, 更像在讲.",
@@ -850,6 +852,9 @@ function memorySummary(memory?: UserMemory): unknown {
 function cleanSongAnswer(value: unknown, name: string, blockedPhrases: string[] = []): string | undefined {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) return undefined;
+
+  const unsupportedClaims = ["刚才", "已经放过", "放过一次", "第二遍", "第一遍", "上一遍", "酸", "咬开", "壳硬", "汁水"];
+  if (unsupportedClaims.some((phrase) => text.includes(phrase))) return undefined;
 
   const bad = ["这首歌是在讲", "这首大概在讲", "这首是在讲", "这首讲的是", "这首在讲", "这首在问", "这首里有", "它表达了", "对我来说", "提醒我们", "我先抓住", "我会先抓住", "我先听见", "这一句", "这句像", "别急着拆", "画面", "意义", "标准答案", "交代完整", "完整剧情", "真正扎人", "守护心里", "正好让这旋律", "情绪不是直给", "稳住状态", "把呼吸放稳", "先不用讲太满", "听到哪里算哪里", "模式", "更像在讲", "不是把", "这些词放在一起", "它不把", "反而", "留着一点体面", "这句话像", "歌词线索", "说明", "象征"];
   if ([...bad, ...blockedPhrases].some((phrase) => phrase && text.includes(phrase))) return undefined;

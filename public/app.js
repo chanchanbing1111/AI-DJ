@@ -766,12 +766,20 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
     state.reply.introPending = true;
     renderBroadcast(state.reply);
   }
-  const text = await ensureIntroTextForTrack(track, {
+  let text = await ensureIntroTextForTrack(track, {
     mode,
     timeoutMs: mode === "opening" ? 30000 : 18000,
     allowFallback: mode !== "opening",
     fast: mode === "opening"
   });
+  if (!text && mode === "opening" && isActivePlaybackSession(sessionId, track) && trackKey(state.reply?.play) === key) {
+    text = await ensureIntroTextForTrack(track, {
+      mode,
+      timeoutMs: 45000,
+      allowFallback: true,
+      fast: false
+    });
+  }
   if (!text || introRequestId !== state.introRequestId || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return "";
   if (state.reply) {
     state.reply.say = text;
