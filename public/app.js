@@ -1756,12 +1756,12 @@ function buildOpeningFallback(track, lines = [], anchor = "") {
   const now = new Date();
   const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
   const hour = now.getHours();
-  const timeWord = hour >= 22 ? "夜深了" : hour >= 18 ? "晚上好" : hour >= 12 ? "午后好" : "早上好";
+  const timeWord = hour >= 22 ? "night is getting late" : hour >= 18 ? "evening is here" : hour >= 12 ? "afternoon has settled" : "morning is open";
   const image = anchor || pickAutoAnchorLine(lines, track.title);
   const detail = image
-    ? `我把耳朵停在「${image.slice(0, 12)}」旁边，不拆开它，只让那点空白先亮一下。`
-    : "先把外面的杂音放远一点，给这几分钟留一块干净的地方。";
-  return `This is Claudio. ${weekday}，${timeWord}。${track.artist}的《${track.title}》放在第一首。${detail}如果今天还没找到自己的速度，就从这里开始。`;
+    ? `There is a small line inside it: ${image.slice(0, 12)}. I won't explain it flat; just notice where your chest answers.`
+    : "It does not rush the room. It leaves enough air around the first note.";
+  return `This is Claudio. ${weekday}, ${timeWord}. Here's something to breathe with for a moment. ${detail} This one's ${track.artist}的《${track.title}》. Let it take the first step.`;
 }
 
 function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = "handoff" }) {

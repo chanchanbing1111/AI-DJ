@@ -245,11 +245,11 @@ async function buildTrackIntro(env: Env, input: {
       ? [
           "Opening-song format target:",
           "Start with exactly: This is Claudio.",
-          "Then mention the real day/time in one quiet sentence if available from context.",
-          "Then introduce the exact artist/title as a song chosen for this moment.",
-          "Use lyric cues to create a concrete listening doorway: an object, gesture, or pressure in the song. Transform the cue; do not quote it mechanically.",
-          "If verified background is unavailable, do not fake history. Replace history with sonic/lyric observation: vocal distance, tempo, repeated image, emotional movement.",
-          "The target rhythm is like: This is Claudio. It's late on Monday. Here's a song that moves with your breath... this one's called If. After a long day, just breathe.",
+          "Write like a cinematic radio cold open, not a Chinese lyric-analysis paragraph.",
+          "Use 5-7 short spoken sentences. Let each sentence feel like a breath.",
+          "Sentence arc: 1) This is Claudio. 2) real day/time or weather. 3) one sensory claim about how the song moves, breathes, or enters the body. 4) one verified lyric/sonic detail transformed into an image. 5) exact artist/title. 6) a small listener-facing landing line.",
+          "If verified creation background is unavailable, do not fake history. Replace history with sonic evidence: vocal distance, tempo, guitar/piano/drums/synth texture, repeated phrase, or emotional movement.",
+          "The target rhythm is close to: This is Claudio. It's late on Monday. Here's a song that moves with your breath. A nylon-string guitar lets every line end in a whisper. You may feel yourself lift off the ground a little. This one's called If. After a long day, just breathe.",
           "Do not say the opening is preparing, do not apologize, do not discuss syncing lyrics/audio, do not mention that you are an AI."
         ].join("\n")
       : [
@@ -259,8 +259,9 @@ async function buildTrackIntro(env: Env, input: {
           "Never say '先放', '接上', or any stock transition. Make it feel like a host continuing a thought."
         ].join("\n"),
     "Silently extract three notes from lyric cues before writing: one concrete object/action, one emotional conflict, and one reason this song fits the listener now. Do not output the notes.",
-    "Do not summarize the song or explain what it is about. Open a small lived scene from the lyric evidence, then name artist/title once, then make one human turn.",
+    "Do not summarize the song or explain what it is about. Write a small spoken prelude that makes the listener want to hear the track.",
     "Avoid generic radio-poetry defaults unless the lyric directly supports them: wind, room, light, night, silence, company, slowly, stay here, let it accompany you.",
+    "Do not use fake literary-host gestures: 我把耳朵停在, 不拆开它, 只让那点空白先亮一下, 放在第一首, 如果今天还没找到自己的速度, 从这里开始, 把频道接住, 把方向拨开.",
     "The copy should sound like a real late-night host who has listened to the song, not like a reading-comprehension answer or a motivational card.",
     mode === "handoff"
       ? "Write a natural handoff from previous song into this one. Do not use stock transition wording."
@@ -271,7 +272,7 @@ async function buildTrackIntro(env: Env, input: {
     "Do not start by calling the listener's name. Use the listener name at most once, and only if it sounds intimate.",
     "Chinese, 150-230 Chinese characters. Occasional simple English is okay only for 'This is Claudio'.",
     "Avoid: 这首歌, 这首在讲, 这首大概在讲, 对我来说, 提醒我们, 这几个字, 这句话像, 歌词线索, 标准答案, 先放, 先听着, 慢慢进来, 接上来, 从这里进来, 从旁边进来, 歌进来, 声音进来, 留一点暗, 灯先暗一点, 把声音放轻, 不急着解释, 模式, 稳住状态, 好.",
-    "Reference feel: This is Claudio。窗外还有车声，房间里只剩屏幕的光。孙燕姿的《遇见》留给今晚。它不是替谁许愿，而是把那种已经走了很久、仍然愿意等一个转角的心情放在桌上。你不用马上回答自己还在等什么，先让这几分钟陪你把那个问题听清楚。"
+    "Reference feel: This is Claudio. Friday afternoon. Here is a song that moves like a held breath finally finding a window. The vocal keeps a little distance, and the repeated words feel less like an answer than a pulse. This one's 陈粒的《空空》. If the day has been too loud, let the first verse lower the ceiling a little."
   ].join("\n");
 
   try {
@@ -327,7 +328,13 @@ function isUsableFastIntro(text: string, track: Track): boolean {
     "把频道接住",
     "把方向",
     "不用被解释得太满",
-    "别急着把感受收起来"
+    "别急着把感受收起来",
+    "放在第一首",
+    "我把耳朵停在",
+    "不拆开它",
+    "空白先亮一下",
+    "找到自己的速度",
+    "从这里开始"
   ];
   if (forbidden.some((phrase) => text.includes(phrase))) return false;
   return text.includes(track.title) || text.includes(track.artist);
@@ -342,6 +349,14 @@ function passesIntroQuality(text: string, track: Track): boolean {
     "歌进来",
     "声音进来",
     "这首歌",
+    "放在第一首",
+    "我把耳朵停在",
+    "不拆开它",
+    "空白先亮一下",
+    "找到自己的速度",
+    "从这里开始",
+    "把频道接住",
+    "把方向拨开",
     "这首在讲",
     "大概在讲",
     "这几个字",
