@@ -1243,7 +1243,8 @@ async function loadLyrics(track, sessionId = state.playSessionId) {
   state.lyrics = await getParsedLyrics(track, data);
   if (state.lyrics.length) {
     state.lyricActiveIndex = -1;
-    if (!els.broadcastCard.classList.contains("speaking")) {
+    const introStillNeedsScreen = state.reply?.introPending || (state.reply?.say && state.introducedTrackId !== track.id);
+    if (!els.broadcastCard.classList.contains("speaking") && !introStillNeedsScreen) {
       state.transcriptMode = "lyrics";
       renderLyrics();
       updateBroadcastDuration();
@@ -1754,14 +1755,14 @@ async function buildAutoSegue(candidate, current, options = {}) {
 
 function buildOpeningFallback(track, lines = [], anchor = "") {
   const now = new Date();
-  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const weekday = now.toLocaleDateString("zh-CN", { weekday: "long" });
   const hour = now.getHours();
-  const timeWord = hour >= 22 ? "night is getting late" : hour >= 18 ? "evening is here" : hour >= 12 ? "afternoon has settled" : "morning is open";
+  const timeWord = hour >= 22 ? "夜深了" : hour >= 18 ? "晚上到了" : hour >= 12 ? "下午落稳了" : "早上刚打开";
   const image = anchor || pickAutoAnchorLine(lines, track.title);
   const detail = image
-    ? `There is a small line inside it: ${image.slice(0, 12)}. I won't explain it flat; just notice where your chest answers.`
-    : "It does not rush the room. It leaves enough air around the first note.";
-  return `This is Claudio. ${weekday}, ${timeWord}. Here's something to breathe with for a moment. ${detail} This one's ${track.artist}的《${track.title}》. Let it take the first step.`;
+    ? `我只留住一句：${image.slice(0, 12)}。不用把它讲满，听听身体先在哪个字上停一下。`
+    : "先给这几分钟留一点空地，让第一声人声自己靠近。";
+  return `This is Claudio. ${weekday}，${timeWord}。${track.artist}的《${track.title}》先在这里响起。${detail}今天先不急着给自己下结论，让它把呼吸带回来一点。`;
 }
 
 function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = "handoff" }) {
