@@ -207,6 +207,7 @@ async function writeTrackIntro(env: Env, input: {
   context: MoodContext;
   track: Track | null;
   mode: "opening" | "recommend" | "handoff";
+  fast?: boolean;
   memory?: UserMemory;
   previousTrack?: Track | null;
 }): Promise<string> {
@@ -220,10 +221,11 @@ async function buildTrackIntro(env: Env, input: {
   context: MoodContext;
   track: Track | null;
   mode: "opening" | "recommend" | "handoff";
+  fast?: boolean;
   memory?: UserMemory;
   previousTrack?: Track | null;
 }): Promise<{ say: string; source: "llm" | "fallback"; raw?: string; parsed?: string; cleaned?: string; fallback?: string; error?: string }> {
-  const { profile, routine, message, context, track, mode, memory, previousTrack } = input;
+  const { profile, routine, message, context, track, mode, fast, memory, previousTrack } = input;
   if (!track) {
     const say = `${profile.name}，这会儿还没摸到能接上的那一首。歌单留在这儿，我再往里找。`;
     return { say, source: "fallback", fallback: say };
@@ -280,6 +282,10 @@ async function buildTrackIntro(env: Env, input: {
     if (!text) throw new Error("No intro text.");
     const parsed = parseJsonObject<{ say?: string; line?: string }>(text);
     const parsedText = parsed.say ?? parsed.line ?? "";
+    const firstPass = cleanDjIntro(parsedText, profile.name, track, memory?.blockedPhrases);
+    if ((fast || mode === "opening") && firstPass && isUsableFastIntro(firstPass, track)) {
+      return { say: firstPass, source: "llm", raw: text, parsed: parsedText, cleaned: firstPass, fallback };
+    }
     const refinedText = await refineDjIntro(env, {
       draft: parsedText,
       track,
@@ -308,6 +314,23 @@ async function buildTrackIntro(env: Env, input: {
   } catch (error) {
     return { say: fallback, source: "fallback", fallback, error: error instanceof Error ? error.message : "Unknown intro error" };
   }
+}
+
+function isUsableFastIntro(text: string, track: Track): boolean {
+  if (!passesIntroQuality(text, track)) return false;
+  const forbidden = [
+    "准备",
+    "同步",
+    "技术",
+    "兜底",
+    "先让这首歌",
+    "把频道接住",
+    "把方向",
+    "不用被解释得太满",
+    "别急着把感受收起来"
+  ];
+  if (forbidden.some((phrase) => text.includes(phrase))) return false;
+  return text.includes(track.title) || text.includes(track.artist);
 }
 
 function passesIntroQuality(text: string, track: Track): boolean {
@@ -385,6 +408,7 @@ export async function writeDjIntroForTrack(env: Env, input: {
   context: MoodContext;
   track: Track | null;
   mode?: "opening" | "recommend" | "handoff";
+  fast?: boolean;
   memory?: UserMemory;
   previousTrack?: Track | null;
 }): Promise<string> {
@@ -396,6 +420,7 @@ export async function writeDjIntroForTrack(env: Env, input: {
     context: input.context,
     track: input.track,
     mode: input.mode ?? "recommend",
+    fast: input.fast,
     memory: input.memory,
     previousTrack: input.previousTrack
   });
@@ -407,6 +432,7 @@ export async function debugDjIntroForTrack(env: Env, input: {
   context: MoodContext;
   track: Track | null;
   mode?: "opening" | "recommend" | "handoff";
+  fast?: boolean;
   memory?: UserMemory;
   previousTrack?: Track | null;
 }): Promise<unknown> {
@@ -418,6 +444,7 @@ export async function debugDjIntroForTrack(env: Env, input: {
     context: input.context,
     track: input.track,
     mode: input.mode ?? "recommend",
+    fast: input.fast,
     memory: input.memory,
     previousTrack: input.previousTrack ?? null
   });

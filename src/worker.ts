@@ -164,7 +164,7 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
   }
 
   if (request.method === "POST" && url.pathname === "/api/dj/intro") {
-    const body = (await request.json()) as { track?: Track | null; previousTrack?: Track | null; message?: string; context?: MoodContext; mode?: "opening" | "recommend" | "handoff" };
+    const body = (await request.json()) as { track?: Track | null; previousTrack?: Track | null; message?: string; context?: MoodContext; mode?: "opening" | "recommend" | "handoff"; fast?: boolean };
     const profile = await getProfile(env);
     const memory = await getUserMemory(env);
     const say = await writeDjIntroForTrack(env, {
@@ -173,6 +173,7 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
       context: body.context ?? {},
       track: body.track ?? null,
       mode: body.mode ?? "recommend",
+      fast: body.fast ?? body.mode === "opening",
       memory,
       previousTrack: body.previousTrack ?? null
     });
@@ -189,7 +190,7 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
   }
 
   if (request.method === "POST" && url.pathname === "/api/dj/intro/debug") {
-    const body = (await request.json()) as { track?: Track | null; previousTrack?: Track | null; message?: string; context?: MoodContext; mode?: "opening" | "recommend" | "handoff" };
+    const body = (await request.json()) as { track?: Track | null; previousTrack?: Track | null; message?: string; context?: MoodContext; mode?: "opening" | "recommend" | "handoff"; fast?: boolean };
     const profile = await getProfile(env);
     const memory = await getUserMemory(env);
     return json(await debugDjIntroForTrack(env, {
@@ -198,6 +199,7 @@ async function routeApi(request: Request, env: Env, url: URL): Promise<Response>
       context: body.context ?? {},
       track: body.track ?? null,
       mode: body.mode ?? "recommend",
+      fast: body.fast ?? body.mode === "opening",
       memory,
       previousTrack: body.previousTrack ?? null
     }));

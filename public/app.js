@@ -354,6 +354,7 @@ async function prewarmOpening() {
 
   const prepared = await prepareOpeningIntroForCurrentTrack(requestStartedAt);
   if (prepared) return prepared;
+  if (state.reply?.play) return state.reply;
 
   const reply = await refreshOpening({ silent: false, requestStartedAt });
   if (state.openingStartedAt !== requestStartedAt) return null;
@@ -408,7 +409,7 @@ async function prepareOpeningIntroForCurrentTrack(requestStartedAt) {
 
   if (state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
   const introRequestId = ++state.introRequestId;
-  const say = await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 18000 });
+  const say = await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 30000, allowFallback: false, fast: true });
   if (!say || introRequestId !== state.introRequestId || state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
 
   state.reply.say = say;
@@ -686,7 +687,7 @@ async function waitForOpeningReady() {
   if (state.reply?.say && trackKey(state.reply.play) === state.openingReadyTrackKey) return;
   await Promise.race([
     state.openingPromise.catch(() => null),
-    wait(12000)
+    wait(3500)
   ]);
 }
 
@@ -765,7 +766,12 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
     state.reply.introPending = true;
     renderBroadcast(state.reply);
   }
-  const text = await ensureIntroTextForTrack(track, { mode, timeoutMs: 18000 });
+  const text = await ensureIntroTextForTrack(track, {
+    mode,
+    timeoutMs: mode === "opening" ? 30000 : 18000,
+    allowFallback: mode !== "opening",
+    fast: mode === "opening"
+  });
   if (!text || introRequestId !== state.introRequestId || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return "";
   if (state.reply) {
     state.reply.say = text;
@@ -780,7 +786,7 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
   return text;
 }
 
-async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 9000 } = {}) {
+async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 9000, allowFallback = true, fast = mode === "opening" } = {}) {
   if (!track) return "";
   if (state.reply?.say && trackKey(state.reply.play) === trackKey(track)) return state.reply.say;
   try {
@@ -789,6 +795,7 @@ async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 
       body: {
         track,
         previousTrack: null,
+        fast,
         mode,
         message: mode === "opening"
           ? "为当前已经选定的第一首歌补一段 Claudio 开场。不要提准备、同步、技术状态。"
@@ -805,6 +812,7 @@ async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 
   } catch {
     // If the model is slow, use a short local line instead of losing the DJ voice entirely.
   }
+  if (!allowFallback) return "";
   const lines = await lyricPreviewLines(track);
   const anchor = pickAutoAnchorLine(lines, track.title);
   if (mode === "opening") return buildOpeningFallback(track, lines, anchor);
