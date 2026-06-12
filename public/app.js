@@ -1757,12 +1757,18 @@ function buildOpeningFallback(track, lines = [], anchor = "") {
   const now = new Date();
   const weekday = now.toLocaleDateString("zh-CN", { weekday: "long" });
   const hour = now.getHours();
-  const timeWord = hour >= 22 ? "夜深了" : hour >= 18 ? "晚上到了" : hour >= 12 ? "下午落稳了" : "早上刚打开";
+  const scene = hour >= 22
+    ? `${weekday}夜里，屏幕的光可以低一点`
+    : hour >= 18
+      ? `${weekday}晚上，窗外还有一点车声`
+      : hour >= 12
+        ? `${weekday}下午，时间停在杯子旁边`
+        : `${weekday}早上，先别把一天填得太满`;
   const image = anchor || pickAutoAnchorLine(lines, track.title);
   const detail = image
-    ? `我只留住一句：${image.slice(0, 12)}。不用把它讲满，听听身体先在哪个字上停一下。`
-    : "先给这几分钟留一点空地，让第一声人声自己靠近。";
-  return `This is Claudio. ${weekday}，${timeWord}。${track.artist}的《${track.title}》先在这里响起。${detail}今天先不急着给自己下结论，让它把呼吸带回来一点。`;
+    ? `歌里那句「${image.slice(0, 14)}」像一张没有摊平的纸，边角还翘着。`
+    : "它的声音不抢人，像门虚掩着，留一点余地给你。";
+  return `This is Claudio. ${scene}。${track.artist}的《${track.title}》。${detail}先听这一段，把外面的事放远一点。`;
 }
 
 function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = "handoff" }) {
@@ -1774,12 +1780,12 @@ function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = 
   const detail = anchor || images[0] || "";
   const second = images.find((line) => line !== detail) || "";
   if (detail && second) {
-    return `${handoff}${detail}和${second}挨得很近，像一个人把话说到一半，又把后半句交给呼吸。前一首留下的情绪不用马上换掉，让这几分钟把它换一种形状。`;
+    return `${handoff}${detail}和${second}挨得很近，像两件旧物放在同一个抽屉里。先听它怎么把话收住，再看心里哪一处松动。`;
   }
   if (detail) {
-    return `${handoff}${detail}停在那里，像杯沿上一点水汽。它不急着变成答案，只把心里那块还没落地的地方轻轻托住。`;
+    return `${handoff}${detail}停在那里，像纸上没擦干净的一道铅笔印。别替它补全，听完这一段就够。`;
   }
-  return `${handoff}前一首的尾音还没有完全散掉，这里换一盏更近的光。别急着判断它，先让第一段人声把房间重新摆好。`;
+  return `${handoff}前一首的尾音还在，新的鼓点会把空气重新分开。先听一段，再决定要不要往下走。`;
 }
 
 function pickQuickNextTrack(current) {
@@ -1798,8 +1804,8 @@ function pickQuickNextTrack(current) {
 
 function quickAutoSegue(candidate, current, options = {}) {
   const previousTitle = current?.title ? `《${current.title}》` : "上一首";
-  const opening = options.reason === "ended" ? `${previousTitle}留下的情绪还在` : "我把方向拨开一点";
-  return `${opening}。${candidate.artist}的《${candidate.title}》。先让电台不断线，剩下的话我放到下一口气里。`;
+  const opening = options.reason === "ended" ? `${previousTitle}收尾了` : "我换一首";
+  return `${opening}，现在到${candidate.artist}的《${candidate.title}》。先让声音接上，细的话待会儿再说。`;
 }
 
 async function hydrateAutoSegue(candidate, current, options = {}) {

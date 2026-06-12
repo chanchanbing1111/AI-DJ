@@ -249,10 +249,12 @@ async function buildTrackIntro(env: Env, input: {
           "Use 5-7 short spoken sentences. Let each sentence feel like a breath.",
           "Sentence arc: 1) This is Claudio. 2) real day/time or weather. 3) one sensory claim about how the song moves, breathes, or enters the body. 4) one verified lyric/sonic detail transformed into an image. 5) exact artist/title. 6) a small listener-facing landing line.",
           "If verified creation background is unavailable, do not fake history. Replace history with sonic evidence: vocal distance, tempo, guitar/piano/drums/synth texture, repeated phrase, or emotional movement.",
-          "The target rhythm is close to: This is Claudio. It's late on Monday. Here's a song that moves with your breath. A nylon-string guitar lets every line end in a whisper. You may feel yourself lift off the ground a little. This one's called If. After a long day, just breathe.",
-          "The English sample is rhythm reference only. Output Chinese after the exact first sentence. Do not output English phrases like here's, this one's, breathe with, let it, held breath.",
-          "Do not say the opening is preparing, do not apologize, do not discuss syncing lyrics/audio, do not mention that you are an AI."
-        ].join("\n")
+            "The target rhythm is close to: This is Claudio. It's late on Monday. Here's a song that moves with your breath. A nylon-string guitar lets every line end in a whisper. You may feel yourself lift off the ground a little. This one's called If. After a long day, just breathe.",
+            "The English sample is rhythm reference only. Output Chinese after the exact first sentence. Do not output English phrases like here's, this one's, breathe with, let it, held breath.",
+            "Do not imitate the sample literally. Do not translate 'moves with your breath' or 'just breathe'.",
+            "Use plain, intimate Chinese. Prefer one concrete detail over abstract comfort. The listener should feel a private radio host, not a motivational writer.",
+            "Do not say the opening is preparing, do not apologize, do not discuss syncing lyrics/audio, do not mention that you are an AI."
+          ].join("\n")
       : [
           "Non-opening format target:",
           "Do not say 'This is Claudio'.",
@@ -261,9 +263,10 @@ async function buildTrackIntro(env: Env, input: {
         ].join("\n"),
     "Silently extract three notes from lyric cues before writing: one concrete object/action, one emotional conflict, and one reason this song fits the listener now. Do not output the notes.",
     "Do not summarize the song or explain what it is about. Write a small spoken prelude that makes the listener want to hear the track.",
-    "Avoid generic radio-poetry defaults unless the lyric directly supports them: wind, room, light, night, silence, company, slowly, stay here, let it accompany you.",
-    "Do not use fake literary-host gestures: 我把耳朵停在, 不拆开它, 只让那点空白先亮一下, 放在第一首, 如果今天还没找到自己的速度, 从这里开始, 把频道接住, 把方向拨开.",
-    "Do not explain recommendation logic. Avoid 因为, 所以, 适合你因为, 我选它因为, 这说明.",
+      "Avoid generic radio-poetry defaults unless the lyric directly supports them: wind, room, light, night, silence, company, slowly, stay here, let it accompany you.",
+      "Do not use fake literary-host gestures: 我把耳朵停在, 不拆开它, 只让那点空白先亮一下, 放在第一首, 如果今天还没找到自己的速度, 从这里开始, 把频道接住, 把方向拨开.",
+      "Also avoid these overused Claudio-like templates: 不用把它讲满, 听听身体, 身体先, 呼吸带回来, 给自己下结论, 房间忽然空出, 人站在镜子前, 会听见自己和自己, 隔着风, 风先经过, 带回身体, 先留住一句, 第一段人声, 留出一点空间, 杯沿上一点水汽.",
+      "Do not explain recommendation logic. Avoid 因为, 所以, 适合你因为, 我选它因为, 这说明.",
     "The copy should sound like a real late-night host who has listened to the song, not like a reading-comprehension answer or a motivational card.",
     mode === "handoff"
       ? "Write a natural handoff from previous song into this one. Do not use stock transition wording."
@@ -329,12 +332,48 @@ function isUsableFastIntro(text: string, track: Track): boolean {
     "先让这首歌",
     "把频道接住",
     "把方向",
-    "不用被解释得太满",
-    "别急着把感受收起来",
+      "不用被解释得太满",
+      "不用把它讲满",
+      "把它讲满",
+      "听听身体",
+      "身体先",
+      "哪个字上停",
+      "呼吸带回来",
+      "带回身体",
+      "给自己下结论",
+      "先留住一句",
+      "第一段人声",
+      "留出一点空间",
+      "房间忽然空出",
+      "人站在镜子前",
+      "会听见自己和自己",
+      "隔着风",
+      "风先经过",
+      "杯沿上一点水汽",
+      "别急着把感受收起来",
     "放在第一首",
     "我把耳朵停在",
-    "不拆开它",
-    "空白先亮一下",
+      "不拆开它",
+      "不用把它讲满",
+      "把它讲满",
+      "听听身体",
+      "身体先",
+      "哪个字上停",
+      "呼吸带回来",
+      "带回身体",
+      "给自己下结论",
+      "房间忽然空出",
+      "人站在镜子前",
+      "会听见自己和自己",
+      "隔着风",
+      "风先经过",
+      "先留住一句",
+      "第一段人声",
+      "留出一点空间",
+      "杯沿上一点水汽",
+      "不急着变成答案",
+      "不需要变成答案",
+      "空白先亮一下",
     "找到自己的速度",
     "从这里开始",
     "Here's",
@@ -887,13 +926,14 @@ function memorySummary(memory?: UserMemory): unknown {
 }
 
 function cleanSongAnswer(value: unknown, name: string, blockedPhrases: string[] = []): string | undefined {
-  const text = typeof value === "string" ? value.trim() : "";
+  let text = typeof value === "string" ? value.trim() : "";
+  text = text.replace(/^This is Claudio[。.，,、\s]*/i, "").trim();
   if (!text) return undefined;
 
   const unsupportedClaims = ["刚才", "已经放过", "放过一次", "第二遍", "第一遍", "上一遍", "酸", "咬开", "壳硬", "汁水"];
   if (unsupportedClaims.some((phrase) => text.includes(phrase))) return undefined;
 
-  const bad = ["这首歌是在讲", "这首大概在讲", "这首是在讲", "这首讲的是", "这首在讲", "这首在问", "这首里有", "它表达了", "对我来说", "提醒我们", "我先抓住", "我会先抓住", "我先听见", "这一句", "这句像", "别急着拆", "画面", "意义", "标准答案", "交代完整", "完整剧情", "真正扎人", "守护心里", "正好让这旋律", "情绪不是直给", "稳住状态", "把呼吸放稳", "先不用讲太满", "听到哪里算哪里", "模式", "更像在讲", "不是把", "这些词放在一起", "它不把", "反而", "留着一点体面", "这句话像", "歌词线索", "说明", "象征"];
+  const bad = ["This is Claudio", "这首歌是在讲", "这首大概在讲", "这首是在讲", "这首讲的是", "这首在讲", "这首在问", "这首里有", "它表达了", "对我来说", "提醒我们", "我先抓住", "我会先抓住", "我先听见", "这一句", "这句像", "别急着拆", "画面", "意义", "标准答案", "交代完整", "完整剧情", "真正扎人", "守护心里", "正好让这旋律", "情绪不是直给", "稳住状态", "把呼吸放稳", "先不用讲太满", "听到哪里算哪里", "模式", "更像在讲", "不是把", "这些词放在一起", "它不把", "反而", "留着一点体面", "这句话像", "歌词线索", "说明", "象征", "房间忽然空出", "会听见自己和自己", "带回身体"];
   if ([...bad, ...blockedPhrases].some((phrase) => phrase && text.includes(phrase))) return undefined;
 
   return text.startsWith(name) ? text : `${name}，${text}`;
@@ -907,19 +947,19 @@ function lyricBasedAnswer(track: Track, lyricContext: string): string {
     return "葡萄和醇酒一出来，时间就慢下来了。有些事当下说不清，只能让它自己变酸、变甜，最后变成心里知道的分寸。";
   }
   if (/当你孤单你会想起谁|想起谁/.test(lyricContext)) {
-    return "This is Claudio。夜色往下落的时候，人会先想起一个名字，不一定要拨出去，只是让它在心里亮一下。这里的孤单不是空房间，是电话握在手里，屏幕还没亮。";
+    return "夜色往下落的时候，人会先想起一个名字。不一定要拨出去，只是握着手机，等屏幕亮一下。这里的孤单很具体，是想有人陪，又知道谁也不能永远替你挡住天黑。";
   }
   if (/世界不一样|让我不一样|坚持对我来说|刚克刚|倔强/.test(lyricContext)) {
     return "“和世界不一样”那一下，像一个人把外套拉紧，还是往前走。它不劝你赢谁，只是把那点没被揉平的自己，轻轻扶了一下。";
   }
   if (/成长变成了|我的隔阂|自由放空|突然就变失落|懂我的梦|彻底放松|回忆组成风|欲望组成梦|镜中/.test(lyricContext)) {
-    return "This is Claudio。房间忽然空出一块，人站在镜子前，会听见自己和自己之间隔着风。别急着把它说清楚，让那阵风先经过，看看它愿不愿意把你带回身体里。";
+    return "前一秒还在自由放空，下一秒突然失落，这个转弯很准。陈粒写的不是空白，而是长大以后和自己隔开了一层：梦还在，回忆也在，只是人不再像从前那样轻易相信它们。";
   }
   if (/一样的月光|沉默的对话|陌生的脸孔|一样的笑容/.test(lyricContext)) {
     return "月光还在，可人和人之间的距离已经变了。“沉默的对话”很准，有些关系不是突然断掉，是慢慢没法好好说话。";
   }
   if (/凤凰|路口|青春|朋友|告别|远方/.test(lyricContext)) {
-    return "This is Claudio。你站在一个很亮的路口，风从校门那边吹过来，大家都还没学会好好告别。远方不是答案，只是有人已经把背包背上了；这首歌留给你的，是挥手之后那几秒安静。";
+    return "路口、朋友、远方这些词放在一起，会有一种毕业照背面的感觉。大家还在笑，可心里已经知道要分开了；远方不是答案，只是有人先把背包背上了。";
   }
   if (/疲倦|深夜|失落|痛楚/.test(lyricContext)) {
     return "疲惫、深夜、失落这些词贴得很近，像灯已经暗了，人还没舍得睡。它没有催你立刻好起来，只是在那些时刻里，给自己找个能撑一下的边。";
@@ -927,7 +967,7 @@ function lyricBasedAnswer(track: Track, lyricContext: string): string {
 
   return lyricContext
     ? buildGenericLyricAnswer(track, lyricContext)
-    : "This is Claudio。歌词还没完全到我手里，我就不替它编秘密。标题、声音、房间里的回响先靠近一点；如果有一句真的浮上来，我们再往里走。";
+    : "歌词还没完全到我手里，我就不替它编秘密。先从标题和声音听起：哪里停住，哪里发紧，往往比完整解释更诚实。";
 }
 
 function buildGenericLyricAnswer(track: Track, lyricContext: string): string {
@@ -939,9 +979,12 @@ function buildGenericLyricAnswer(track: Track, lyricContext: string): string {
     .slice(0, 8);
   const anchor = pickHumanAnchorLine(lines, track.title);
   if (anchor) {
-    return `This is Claudio。房间安静一秒。${anchor.slice(0, 18)}，这一点声音落下来，不需要变成答案，只是在心里亮了一下。`;
+    const next = lines.find((line) => line !== anchor && line.length <= 18) || "";
+    return next
+      ? `${anchor.slice(0, 18)}，后面接着${next.slice(0, 18)}。这两句放在一起，不像在解释什么，更像把一个人没说出口的停顿留下来。`
+      : `${anchor.slice(0, 18)}留在那里。它不用被翻译成道理，听起来更像一个人把话咽回去之前的停顿。`;
   }
-  return "This is Claudio。歌词还没有完全亮起来，我就不替它编故事了。声音先靠近房间，等真正的句子浮上来，我们再一起往里走。";
+  return "歌词还没有完全亮起来，我就不替它编故事了。先听声音的距离，听它把哪一处压低；等句子浮上来，再往里看。";
 }
 
 function pickHumanAnchorLine(lines: string[], title = ""): string {
@@ -967,17 +1010,17 @@ function buildIntroFallback(
   previousTrack?: Track | null
 ): string {
   if (mode === "handoff") {
-    const previous = previousTrack?.title ? `《${previousTrack.title}》留下的情绪还在` : "上一首留下的情绪还在";
-    return `${previous}，不用急着换一种心情。接下来是${track.artist}的《${track.title}》。${humanTrackLine(track, lyricContext, message, mode)}`;
+    const previous = previousTrack?.title ? `《${previousTrack.title}》收尾了` : "上一首收尾了";
+    return `${previous}，现在到${track.artist}的《${track.title}》。${humanTrackLine(track, lyricContext, message, mode)}`;
   }
-  return `This is Claudio。${openingScene(message)}${track.artist}的《${track.title}》。${humanTrackLine(track, lyricContext, message, mode)}`;
+  return `This is Claudio. ${openingScene(message)}${track.artist}的《${track.title}》。${humanTrackLine(track, lyricContext, message, mode)}`;
 }
 
 function openingScene(message: string): string {
-  if (/夜|晚|睡|安静|失眠/.test(message)) return "夜往下沉，灯不用开得太亮。";
-  if (/累|疲|困|烦|崩|撑不住|压力|难受|低落/.test(message)) return "今天已经够长了，别急着把自己收拾好。";
-  if (/专注|工作|学习|代码|内容|写|做事/.test(message)) return "桌面先留一点静，键盘声往后退半步。";
-  return "这里先留一点空。";
+  if (/夜|晚|睡|安静|失眠/.test(message)) return "夜里，窗外的声音还没停。";
+  if (/累|疲|困|烦|崩|撑不住|压力|难受|低落/.test(message)) return "今天过得有点重，先把音量放低。";
+  if (/专注|工作|学习|代码|内容|写|做事/.test(message)) return "桌面还亮着，手边的事先不用停。";
+  return "现在把频道打开。";
 }
 
 function humanTrackLine(track: Track, lyricContext: string, message: string, mode: "opening" | "recommend" | "handoff"): string {
@@ -995,7 +1038,7 @@ function humanTrackLine(track: Track, lyricContext: string, message: string, mod
     return "借它一点硬气。不是冲出去赢谁，是把心里还亮着的那块地方留住；鼓点起来以后，你跟着往前走就好。";
   }
   if (track.artist.includes("陈粒") && track.title.includes("空空")) {
-    return "陈粒的声音一进来，房间会空出一点位置。风、梦、回忆都不用落地，就让它们在你旁边绕一圈。";
+    return "回忆和欲望在歌词里被写成风和梦，听起来轻，其实底下压着一点和自己拉开的距离。";
   }
   if (track.artist.includes("周传雄") && track.title.includes("青花")) {
     return "像一封没寄出去的信，纸边还有一点凉。风从旧事里穿过去，不催人回头，只把没说完的地方轻轻吹亮。";
@@ -1018,7 +1061,7 @@ function humanTrackLine(track: Track, lyricContext: string, message: string, mod
   }
 
   if (track.background) {
-    return `${track.background.slice(0, 58)}。让这个细节在耳边留一会儿，再把歌往里放。`;
+    return `${track.background.slice(0, 58)}。这个细节够了，剩下的交给前几秒声音。`;
   }
   if (tired) {
     return "今天累的话，我不放太亮的东西；让耳朵有个落点，让肩膀也有地方落下来。";
@@ -1027,10 +1070,10 @@ function humanTrackLine(track: Track, lyricContext: string, message: string, mod
     return "这首不抢人，适合低一点音量放着；让注意力有个边界，手上的事慢慢往前推。";
   }
   return mode === "recommend"
-    ? "这一首放在这里，像把窗开一条小缝；你听一小段，如果风向对，我再往旁边接。"
+    ? "先听一小段。如果它没有抓住你，我再往旁边换。"
     : mode === "handoff"
-      ? "别急着把情绪切断，让新的一层空气慢慢盖上来。"
-      : "声音放低一点，让它在房间里陪你走一小段。";
+      ? "它会换一层颜色，不需要你立刻跟上。"
+      : "声音放低一点，先听前几句怎么落。";
 }
 
 function introTail(message: string): string {
@@ -1065,16 +1108,16 @@ function introFromLyricImage(track: Track, lyricContext: string, message: string
   const focus = /专注|工作|学习|代码|内容|写|做事/.test(message);
 
   if (/世界不一样|让我不一样|倔强|刚克刚/.test(lyricContext)) {
-    return "借它一点硬气吧。不是要你冲出去赢谁，只是别把自己心里那块还亮着的地方交出去。";
+    return "鼓点会把人往前推，但它要的不是逞强，是把那点没被磨平的自己留住。";
   }
   if (/天亮|积雪|肩膀|看海|照片/.test(lyricContext)) {
-    return "冷了一夜的东西，会在天亮前慢慢松开。歌里那一点肩膀和远处的海，像有人把外套往你这边挪了一寸。";
+    return "积雪、肩膀、看海的照片，都是很具体的依靠。它没有把难过抹掉，只是给人一个可以等到天亮的地方。";
   }
   if (/没有星星|星星|夜空|不懂/.test(lyricContext)) {
-    return "夜空没有替谁作证，那些没被接住的话就收回来一点。别再递得太远了，让声音替你把门轻轻合上。";
+    return "没有星星的夜空，不是浪漫，是一句话找不到回声。听到这里，就别再把解释递给不懂的人了。";
   }
   if (/明天过后|明天|以后|星星|夜空/.test(lyricContext)) {
-    return "明天还没到，夜色也没有完全退。歌往前走的时候，会把窗边那点光留出来，不催你马上看清。";
+    return "它把时间放在明天和以后之间，像人还没走远，告别已经先到了。";
   }
   if (/青春|颜色|岁月|年少|时光|飞逝|年少轻狂|疲惫/.test(lyricContext)) {
     return "多年以后再回头，青春不一定还发亮，倒像一张晒旧的照片。追过的人、冷过的夜、那点疲惫，都被时间磨成另一种颜色。";
@@ -1086,15 +1129,15 @@ function introFromLyricImage(track: Track, lyricContext: string, message: string
     return "像站在路口，大家还在笑，风已经往远处吹。告别没有压下来，只是从背后轻轻推人一步。";
   }
   if (anchor && tired) {
-    return "今天已经够长了。没说完的东西留在门口，等声音走过去，它会替你站一会儿。";
+    return `${anchor.slice(0, 16)}这句别急着跳过。累的时候，人有时只需要一句话替自己停一下。`;
   }
   if (anchor && focus) {
-    return "它不抢你手上的事，只在旁边留一条窄窄的光。让旋律低一点，注意力继续往前走。";
+    return `${anchor.slice(0, 16)}这句先放在旁边。手上的事继续做，让声音留一个边界。`;
   }
   if (anchor) {
-    return "话留短一点。让旋律往前走，意思会自己从缝里透出来。";
+    return `${anchor.slice(0, 16)}不是一句漂亮话，它像整首歌的铰链，轻轻一动，后面的情绪就开了。`;
   }
-  return "先留一点空。歌进来的时候，我们少说两句。";
+  return "前几秒先听人声的位置，再听乐器怎么把它托起来。";
 }
 
 function trackSegue(track: Track | null, routine: Routine): string {
