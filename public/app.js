@@ -523,8 +523,7 @@ async function clearChatHistory() {
 }
 
 function localOpeningSay(track) {
-  return `This is Claudio. \u5f00\u573a\u4e0d\u8d76\u65f6\u95f4\uff0c\u53ea\u5148\u628a\u7b2c\u4e00\u9996\u6b4c\u6446\u597d\uff1a${track.artist}\u7684\u300a${track.title}\u300b\u3002\u7b49\u6b4c\u8bcd\u548c\u58f0\u97f3\u771f\u6b63\u5bf9\u4e0a\uff0c\u6211\u518d\u628a\u8fd9\u4e00\u6bb5\u8bf4\u5f97\u66f4\u51c6\u3002\u73b0\u5728\u5148\u8ba9\u5b83\u505a\u4e00\u4e2a\u5165\u53e3\uff0c\u4e0d\u662f\u7ed3\u8bba\u3002`;
-  return `This is Claudio。先把频道打开。今天不用一上来就解释自己，桌面、窗外和耳机都留一点余地。${track.artist}的《${track.title}》。如果早上的心还没完全醒，就让这首歌先替你把周围的声音隔开一点。`;
+  return buildOpeningFallback(track, []);
 }
 
 function pickStartupTrack() {
@@ -808,10 +807,9 @@ async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 
   }
   const lines = await lyricPreviewLines(track);
   const anchor = pickAutoAnchorLine(lines, track.title);
-  const handoff = mode === "opening"
-    ? `This is Claudio。${track.artist}的《${track.title}》。`
-    : `${track.artist}的《${track.title}》。`;
-  return buildLocalDjFallback({ handoff, lines, anchor, track });
+  if (mode === "opening") return buildOpeningFallback(track, lines, anchor);
+  const handoff = `${track.artist}的《${track.title}》。`;
+  return buildLocalDjFallback({ handoff, lines, anchor, track, mode });
 }
 
 async function resolvePlayableUrl(track, { applyToPlayer = true } = {}) {
@@ -1735,10 +1733,22 @@ async function buildAutoSegue(candidate, current, options = {}) {
   if (/倔强/.test(candidate.title) && candidate.artist?.includes("五月天")) {
     return `${handoff}借它一点硬气，不是冲出去赢谁，是别把心里那块还亮着的地方交出去。`;
   }
-  return buildLocalDjFallback({ handoff, lines, anchor, track: candidate });
+  return buildLocalDjFallback({ handoff, lines, anchor, track: candidate, mode: "handoff" });
 }
 
-function buildLocalDjFallback({ handoff, lines = [], anchor = "", track }) {
+function buildOpeningFallback(track, lines = [], anchor = "") {
+  const now = new Date();
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const hour = now.getHours();
+  const timeWord = hour >= 22 ? "夜深了" : hour >= 18 ? "晚上好" : hour >= 12 ? "午后好" : "早上好";
+  const image = anchor || pickAutoAnchorLine(lines, track.title);
+  const detail = image
+    ? `我把耳朵停在「${image.slice(0, 12)}」旁边，不拆开它，只让那点空白先亮一下。`
+    : "先把外面的杂音放远一点，给这几分钟留一块干净的地方。";
+  return `This is Claudio. ${weekday}，${timeWord}。${track.artist}的《${track.title}》放在第一首。${detail}如果今天还没找到自己的速度，就从这里开始。`;
+}
+
+function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = "handoff" }) {
   const images = lines
     .filter((line) => line && line !== anchor)
     .filter((line) => line.length >= 4 && line.length <= 18)
@@ -1747,12 +1757,12 @@ function buildLocalDjFallback({ handoff, lines = [], anchor = "", track }) {
   const detail = anchor || images[0] || "";
   const second = images.find((line) => line !== detail) || "";
   if (detail && second) {
-    return `${handoff}${detail}，${second}，这些词不用被解释得太满。它们更像一盏灯忽明忽暗，照出人心里那块还没整理好的地方。你先跟着它走一会儿，别急着把感受收起来。`;
+    return `${handoff}${detail}和${second}挨得很近，像一个人把话说到一半，又把后半句交给呼吸。前一首留下的情绪不用马上换掉，让这几分钟把它换一种形状。`;
   }
   if (detail) {
-    return `${handoff}${detail}这句先留在空气里。它不负责把答案说完，只把门推开一点，让你听见自己心里正在回声的部分。`;
+    return `${handoff}${detail}停在那里，像杯沿上一点水汽。它不急着变成答案，只把心里那块还没落地的地方轻轻托住。`;
   }
-  return `${handoff}我先不替它下定义。让旋律自己铺开，等第一段人声出来，你会知道这首歌想把你带到哪里。`;
+  return `${handoff}前一首的尾音还没有完全散掉，这里换一盏更近的光。别急着判断它，先让第一段人声把房间重新摆好。`;
 }
 
 function pickQuickNextTrack(current) {
