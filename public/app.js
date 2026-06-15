@@ -687,7 +687,7 @@ async function waitForOpeningReady() {
   if (state.reply?.say && trackKey(state.reply.play) === state.openingReadyTrackKey) return;
   await Promise.race([
     state.openingPromise.catch(() => null),
-    wait(3500)
+    wait(900)
   ]);
 }
 
@@ -744,6 +744,12 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
     pushDj("这首没有完整歌词，我不硬放。等下一首能把声音和字一起接住。");
     return;
   }
+  const key = trackKey(track);
+  state.lyrics = lyrics;
+  state.lyricsTrackKey = key;
+  state.lyricActiveIndex = -1;
+  state.transcriptMode = "lyrics";
+  renderLyrics();
 
   const played = await playMusic(track, sessionId);
   if (!played || !isActivePlaybackSession(sessionId, track)) return;
@@ -764,7 +770,8 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
   const introRequestId = ++state.introRequestId;
   if (state.reply) {
     state.reply.introPending = true;
-    renderBroadcast(state.reply);
+    els.speakState.innerHTML = "<span></span> Writing";
+    if (state.transcriptMode === "dj" && state.reply.say) renderBroadcast(state.reply);
   }
   let text = await ensureIntroTextForTrack(track, {
     mode,
@@ -1241,13 +1248,12 @@ async function loadLyrics(track, sessionId = state.playSessionId) {
   if (!sameAudioUrl(els.player.currentSrc || els.player.src, track.url)) return;
 
   state.lyrics = await getParsedLyrics(track, data);
-  if (state.lyrics.length) {
-    state.lyricActiveIndex = -1;
-    const introStillNeedsScreen = state.reply?.introPending || (state.reply?.say && state.introducedTrackId !== track.id);
-    if (!els.broadcastCard.classList.contains("speaking") && !introStillNeedsScreen) {
-      state.transcriptMode = "lyrics";
-      renderLyrics();
-      updateBroadcastDuration();
+    if (state.lyrics.length) {
+      state.lyricActiveIndex = -1;
+      if (!els.broadcastCard.classList.contains("speaking")) {
+        state.transcriptMode = "lyrics";
+        renderLyrics();
+        updateBroadcastDuration();
     }
   } else {
     clearLyrics(key);
@@ -1758,17 +1764,20 @@ function buildOpeningFallback(track, lines = [], anchor = "") {
   const weekday = now.toLocaleDateString("zh-CN", { weekday: "long" });
   const hour = now.getHours();
   const scene = hour >= 22
-    ? `${weekday}夜里，屏幕的光可以低一点`
+    ? `${weekday}夜里，窗外还有一点远声`
     : hour >= 18
       ? `${weekday}晚上，窗外还有一点车声`
       : hour >= 12
         ? `${weekday}下午，时间停在杯子旁边`
-        : `${weekday}早上，先别把一天填得太满`;
+        : `${weekday}早上，桌面还亮着`;
   const image = anchor || pickAutoAnchorLine(lines, track.title);
+  if (track.artist?.includes("陈粒") && track.title?.includes("空空")) {
+    return `This is Claudio. ${scene}。陈粒的《空空》。它不是把人写成一片空白，而是写那种突然和自己隔开一点的时刻：梦还在，风也还在，可手心里少了一块确定的东西。先让它在这里响一会儿。`;
+  }
   const detail = image
-    ? `歌里那句「${image.slice(0, 14)}」像一张没有摊平的纸，边角还翘着。`
+    ? `歌里那句「${image.slice(0, 14)}」轻轻露出来，后面藏着一点还没安放好的心事。`
     : "它的声音不抢人，像门虚掩着，留一点余地给你。";
-  return `This is Claudio. ${scene}。${track.artist}的《${track.title}》。${detail}先听这一段，把外面的事放远一点。`;
+  return `This is Claudio. ${scene}。${track.artist}的《${track.title}》。${detail}这几分钟，电台先陪你留在这里。`;
 }
 
 function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = "handoff" }) {
