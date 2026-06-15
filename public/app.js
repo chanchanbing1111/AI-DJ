@@ -409,8 +409,12 @@ async function prepareOpeningIntroForCurrentTrack(requestStartedAt) {
 
   if (state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
   const introRequestId = ++state.introRequestId;
-  const say = await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 30000, allowFallback: false, fast: true });
+  let say = await ensureIntroTextForTrack(track, { mode: "opening", timeoutMs: 7000, allowFallback: true, fast: true });
   if (!say || introRequestId !== state.introRequestId || state.openingStartedAt !== requestStartedAt || trackKey(state.reply?.play) !== key) return null;
+  if (isWeakOpeningIntro(say)) {
+    const lines = await lyricPreviewLines(track);
+    say = buildOpeningFallback(track, lines, pickAutoAnchorLine(lines, track.title));
+  }
 
   state.reply.say = say;
   state.reply.introPending = false;
@@ -728,6 +732,8 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
 
   const track = state.reply?.play;
   if (!track || !isActivePlaybackSession(sessionId, track)) return;
+  const previousTrack = currentPlaybackTrack() ?? state.currentTrack;
+  const isStationOpening = !state.recentTrackKeys.length && !state.introducedTrackId;
   const lyrics = await getParsedLyrics(track);
   if (!lyrics.length) {
     const alternate = await findNextPlayableTrack(track);
@@ -745,6 +751,23 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
     return;
   }
   const key = trackKey(track);
+  const lyricLines = lyrics.map((line) => line.text).filter(Boolean);
+  const shouldRewriteIntro = !state.reply?.say
+    || state.reply.introPending
+    || isWeakOpeningIntro(state.reply.say)
+    || (!isStationOpening && /\bThis is Claudio\b/i.test(state.reply.say));
+  if (state.reply && shouldRewriteIntro) {
+    const anchor = pickAutoAnchorLine(lyricLines, track.title);
+    const immediateSay = isStationOpening
+      ? buildOpeningFallback(track, lyricLines, anchor)
+      : buildFollowupFallback(track, lyricLines, anchor, previousTrack);
+    state.reply.say = immediateSay;
+    state.reply.introPending = false;
+    state.djText = immediateSay;
+    state.openingReadyTrackKey = key;
+    state.introRequestId += 1;
+    prefetchTtsAudio(immediateSay).catch(() => {});
+  }
   state.lyrics = lyrics;
   state.lyricsTrackKey = key;
   state.lyricActiveIndex = -1;
@@ -758,7 +781,7 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
     if (state.reply?.say && !state.reply?.introPending) {
       pushDj(state.reply.say, shouldScroll);
       playDjIntro({ track, text: state.reply.say, sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
-    } else {
+    } else if (els.player.currentTime < 20) {
       hydrateIntroForPlayingTrack(track, { mode: "opening", sessionId, shouldPush: true }).catch(() => {});
     }
   }
@@ -775,27 +798,20 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
   }
   let text = await ensureIntroTextForTrack(track, {
     mode,
-    timeoutMs: mode === "opening" ? 30000 : 18000,
-    allowFallback: mode !== "opening",
+    timeoutMs: mode === "opening" ? 7000 : 18000,
+    allowFallback: true,
     fast: mode === "opening"
   });
-  if (!text && mode === "opening" && isActivePlaybackSession(sessionId, track) && trackKey(state.reply?.play) === key) {
-    text = await ensureIntroTextForTrack(track, {
-      mode,
-      timeoutMs: 45000,
-      allowFallback: true,
-      fast: false
-    });
-  }
   if (!text || introRequestId !== state.introRequestId || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return "";
+  const canAnnounceNow = state.introducedTrackId !== track.id && els.player.currentTime < 20;
   if (state.reply) {
     state.reply.say = text;
     state.reply.introPending = false;
   }
   state.djText = text;
-  renderBroadcast(state.reply);
-  if (shouldPush) pushDj(text, true);
-  if (state.introducedTrackId !== track.id) {
+  if (canAnnounceNow) {
+    renderBroadcast(state.reply);
+    if (shouldPush) pushDj(text, true);
     playDjIntro({ track, text, sessionId, resumeMusic: false, leadInMs: 150, mode: "auto" }).catch(() => {});
   }
   return text;
@@ -818,7 +834,11 @@ async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 
         context: { mood: state.mood, weather: state.weather }
       }
     }), timeoutMs);
-    if (intro?.say && trackKey(state.reply?.play) === trackKey(track)) {
+    const staleOpening = mode === "opening"
+      && !els.player.paused
+      && els.player.currentTime >= 20
+      && state.introducedTrackId === track.id;
+    if (intro?.say && trackKey(state.reply?.play) === trackKey(track) && !staleOpening) {
       state.reply.say = intro.say;
       state.djText = intro.say;
       if (state.transcriptMode === "dj") renderBroadcast(state.reply);
@@ -1780,6 +1800,64 @@ function buildOpeningFallback(track, lines = [], anchor = "") {
   return `This is Claudio. ${scene}。${track.artist}的《${track.title}》。${detail}这几分钟，电台先陪你留在这里。`;
 }
 
+function buildFollowupFallback(track, lines = [], anchor = "", previousTrack = null) {
+  const image = anchor || pickAutoAnchorLine(lines, track.title);
+  const secondary = lines
+    .filter((line) => line && line !== image)
+    .filter((line) => line.length >= 4 && line.length <= 18)
+    .filter((line) => !isLyricCredit(line))
+    .find((line) => line !== track.title) || "";
+  const previous = previousTrack?.title ? `《${previousTrack.title}》` : "上一首";
+  const handoff = previousTrack ? `${previous}的尾音还没完全散` : "情绪换了一个方向";
+
+  if (track.artist?.includes("贰月の羊") && track.title?.includes("重生")) {
+    return `${handoff}，这里转到贰月の羊的《重生》。那些像梦一样没安放好的画面，不是要立刻翻篇；它们只是换了一种声音，提醒人可以从旧壳里出来一点。`;
+  }
+  if (track.artist?.includes("陈粒") && track.title?.includes("果实")) {
+    return `${handoff}，陈粒的《果实》接过来。歌里反复要一个安全的所在，听起来很轻，其实是在给慌乱找一只手。剩下的不用急着说破。`;
+  }
+  if (track.artist?.includes("陈粒") && track.title?.includes("空空")) {
+    return `${handoff}，陈粒的《空空》留在这里。前一秒还在放空，下一秒忽然失落；风和梦都在路上，只是暂时没有哪一个能把人托稳。`;
+  }
+
+  if (image && secondary) {
+    return `${handoff}，现在到${track.artist}的《${track.title}》。${image.slice(0, 14)}和${secondary.slice(0, 14)}挨在一起，像两种心事互相照了一下：一个还想往前，一个还没放下。`;
+  }
+  if (image) {
+    return `${handoff}，现在到${track.artist}的《${track.title}》。我只取${image.slice(0, 14)}这一点，不把它解释成大道理；让它在耳边停一下就够。`;
+  }
+  return `${handoff}，现在到${track.artist}的《${track.title}》。这次不重新开场，只把上一段没有说完的情绪换一副声线继续。`;
+}
+
+function isWeakOpeningIntro(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return true;
+  const weakPhrases = [
+    "现在把频道打开",
+    "把频道打开",
+    "频道接住",
+    "先把频道",
+    "开场不赶时间",
+    "把第一首歌摆好",
+    "先让这首歌",
+    "先听这段",
+    "我在这里",
+    "电台先",
+    "不用把它讲满",
+    "把外面的事放远",
+    "让它把呼吸带回来",
+    "把呼吸带回来",
+    "先别急着",
+    "别急着把",
+    "时间停在杯子旁边",
+    "这几分钟，电台先",
+    "先让它在这里响",
+    "放在第一首",
+    "留在这里响"
+  ];
+  return weakPhrases.some((phrase) => normalized.includes(phrase));
+}
+
 function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = "handoff" }) {
   const images = lines
     .filter((line) => line && line !== anchor)
@@ -1819,8 +1897,13 @@ function quickAutoSegue(candidate, current, options = {}) {
 
 async function hydrateAutoSegue(candidate, current, options = {}) {
   const introRequestId = ++state.introRequestId;
-  const intro = await withTimeout(buildAutoSegue(candidate, current, options), 18000);
+  let intro = await withTimeout(buildAutoSegue(candidate, current, options), 18000);
   if (!intro || introRequestId !== state.introRequestId || trackKey(state.reply?.play) !== trackKey(candidate)) return;
+  if (/\bThis is Claudio\b/i.test(intro) || isWeakOpeningIntro(intro)) {
+    const lines = await lyricPreviewLines(candidate);
+    const anchor = pickAutoAnchorLine(lines, candidate.title);
+    intro = buildFollowupFallback(candidate, lines, anchor, current);
+  }
   state.reply.say = intro;
   state.reply.introPending = false;
   state.djText = intro;
