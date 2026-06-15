@@ -37,6 +37,7 @@ const state = {
   openingStartedAt: 0,
   introRequestId: 0,
   lastAutoAdvancedKey: "",
+  pendingPreviousTrack: null,
   recentTrackKeys: [],
   lastTranscriptWheelAt: 0,
   volumeRamp: null,
@@ -732,7 +733,10 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
 
   const track = state.reply?.play;
   if (!track || !isActivePlaybackSession(sessionId, track)) return;
-  const previousTrack = currentPlaybackTrack() ?? state.currentTrack;
+  const key = trackKey(track);
+  const previousTrack = trackKey(state.reply?.previousTrack) !== trackKey(track)
+    ? state.reply?.previousTrack
+    : (trackKey(state.pendingPreviousTrack) !== key ? state.pendingPreviousTrack : null);
   const isStationOpening = !state.recentTrackKeys.length && !state.introducedTrackId;
   const lyrics = await getParsedLyrics(track);
   if (!lyrics.length) {
@@ -750,7 +754,6 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
     pushDj("这首没有完整歌词，我不硬放。等下一首能把声音和字一起接住。");
     return;
   }
-  const key = trackKey(track);
   const lyricLines = lyrics.map((line) => line.text).filter(Boolean);
   const shouldRewriteIntro = !state.reply?.say
     || state.reply.introPending
@@ -1690,14 +1693,18 @@ function renderTrackCard(track, shouldScroll = true) {
 
 async function playRecommendedNext(options = {}) {
   invalidateOpeningPrewarm();
+  interruptDjForTrackChange();
   state.introRequestId++;
+  state.introducedTrackId = null;
   const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
+  state.pendingPreviousTrack = current ? { ...current } : null;
   if (options.reason !== "ended") {
     const immediate = pickQuickNextTrack(current);
     if (immediate) {
       renderReply({
         say: "",
         play: immediate,
+        previousTrack: state.pendingPreviousTrack,
         introPending: true,
         reason: "用户手动切歌，先从本地歌单即时响应。",
         segue: "先播放，再补完整过渡。",
@@ -1713,6 +1720,7 @@ async function playRecommendedNext(options = {}) {
     renderReply({
       say: "",
       play: candidate,
+      previousTrack: state.pendingPreviousTrack,
       introPending: true,
       reason: "根据当前歌曲的网易云相似歌曲或每日推荐扩展。",
       segue: "顺着相近的情绪继续走。",
@@ -1727,6 +1735,7 @@ async function playRecommendedNext(options = {}) {
     renderReply({
       say: "",
       play: alternate,
+      previousTrack: state.pendingPreviousTrack,
       introPending: true,
       reason: "从本地歌单避开最近播放后接续。",
       segue: "换一条不重复的线。",
@@ -1737,6 +1746,14 @@ async function playRecommendedNext(options = {}) {
   }
 
   renderReply(await ask("\u6362\u4e00\u9996\uff0c\u907f\u5f00\u521a\u521a\u64ad\u8fc7\u7684\u6b4c", false), true, { autoPlay: true });
+}
+
+function interruptDjForTrackChange() {
+  state.playSessionId += 1;
+  state.speakingSessionId += 1;
+  state.introRequestId += 1;
+  stopTtsPlayback();
+  setSpeaking(false);
 }
 
 async function buildAutoSegue(candidate, current, options = {}) {
@@ -1807,8 +1824,9 @@ function buildFollowupFallback(track, lines = [], anchor = "", previousTrack = n
     .filter((line) => line.length >= 4 && line.length <= 18)
     .filter((line) => !isLyricCredit(line))
     .find((line) => line !== track.title) || "";
-  const previous = previousTrack?.title ? `《${previousTrack.title}》` : "上一首";
-  const handoff = previousTrack ? `${previous}的尾音还没完全散` : "情绪换了一个方向";
+  const hasRealPrevious = previousTrack && trackKey(previousTrack) !== trackKey(track);
+  const previous = hasRealPrevious && previousTrack?.title ? `《${previousTrack.title}》` : "上一首";
+  const handoff = hasRealPrevious ? `${previous}的尾音还没完全散` : "情绪换了一个方向";
 
   if (track.artist?.includes("贰月の羊") && track.title?.includes("重生")) {
     return `${handoff}，这里转到贰月の羊的《重生》。那些像梦一样没安放好的画面，不是要立刻翻篇；它们只是换了一种声音，提醒人可以从旧壳里出来一点。`;
