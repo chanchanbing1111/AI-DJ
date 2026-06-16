@@ -221,7 +221,10 @@ function setupEvents() {
       try {
         await playRecommendedNext({ reason: "chat", userMessage: message });
       } catch (error) {
-        pushDj("我这边切歌慢了一拍，先别断线。你再点一次，我会直接从歌单里跳过去。");
+        console.error("[ai-dj] chat music handoff failed", error);
+        if (!forceLocalNextTrack({ reason: "chat-fallback" })) {
+          pushDj("我这边切歌慢了一拍，先别断线。你再点一次，我会直接从歌单里跳过去。");
+        }
       } finally {
         setTransportBusy(false);
       }
@@ -256,7 +259,10 @@ function setupEvents() {
     try {
       await playRecommendedNext();
     } catch (error) {
-      pushDj("我这边找下一首卡了一下，先从本地歌单再拨一次。");
+      console.error("[ai-dj] next button handoff failed", error);
+      if (!forceLocalNextTrack({ reason: "button-fallback" })) {
+        pushDj("我这边找下一首卡了一下，先从本地歌单再拨一次。");
+      }
     } finally {
       setTransportBusy(false);
     }
@@ -1937,6 +1943,33 @@ function pickLooseNextTrack(current) {
   if (!pool.length) return null;
   const seed = Math.abs(hash(`loose:${currentKey}:${Date.now()}:${state.recentTrackKeys.join("|")}`));
   return { ...pool[seed % pool.length] };
+}
+
+function forceLocalNextTrack(options = {}) {
+  const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
+  const track = pickLooseNextTrack(current) ?? pickQuickNextTrack(current);
+  if (!track) return false;
+  try {
+    interruptDjForTrackChange();
+    state.introducedTrackId = null;
+    state.pendingPreviousTrack = current ? { ...current } : null;
+    renderReply({
+      say: "",
+      play: track,
+      previousTrack: state.pendingPreviousTrack,
+      introPending: true,
+      reason: options.reason ?? "forced local handoff",
+      segue: "local immediate fallback",
+      context: { mood: state.mood, weather: state.weather }
+    }, true, { autoPlay: true, forceRender: true });
+    hydrateAutoSegue(track, current, options).catch((error) => {
+      console.warn("[ai-dj] fallback segue failed", error);
+    });
+    return true;
+  } catch (error) {
+    console.error("[ai-dj] force local next failed", error);
+    return false;
+  }
 }
 
 function quickAutoSegue(candidate, current, options = {}) {
