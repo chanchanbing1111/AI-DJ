@@ -30,6 +30,7 @@ const state = {
   autoSkipping: false,
   autoAdvancing: false,
   transportBusy: false,
+  transportStartedAt: 0,
   playbackBusy: false,
   speakingBusy: false,
   openingPromise: null,
@@ -219,12 +220,19 @@ function setupEvents() {
       setTransportBusy(true, "...");
       try {
         await playRecommendedNext({ reason: "chat", userMessage: message });
+      } catch (error) {
+        pushDj("我这边切歌慢了一拍，先别断线。你再点一次，我会直接从歌单里跳过去。");
       } finally {
         setTransportBusy(false);
       }
       return;
     }
-    renderReply(await askWithOptions(message, { shouldPush: false }), true, { autoPlay: false });
+    try {
+      const reply = await withTimeout(askWithOptions(message, { shouldPush: false }), 18000);
+      renderReply(reply, true, { autoPlay: false });
+    } catch (error) {
+      pushDj("大模型刚才没接稳，但我还在。你再问一遍，我继续接着这首歌聊。", true);
+    }
   });
 
   document.querySelectorAll("[data-mood]").forEach((button) => {
@@ -241,12 +249,14 @@ function setupEvents() {
   els.playBtn.addEventListener("click", togglePlayback);
   els.broadcastPlay.addEventListener("click", togglePlayback);
   els.nextBtn.addEventListener("click", async () => {
-    if (state.transportBusy) return;
+    if (state.transportBusy && Date.now() - state.transportStartedAt < 1400) return;
     setTransportBusy(true, "...");
     invalidateOpeningPrewarm();
     state.introducedTrackId = null;
     try {
       await playRecommendedNext();
+    } catch (error) {
+      pushDj("我这边找下一首卡了一下，先从本地歌单再拨一次。");
     } finally {
       setTransportBusy(false);
     }
@@ -698,7 +708,9 @@ async function waitForOpeningReady() {
 
 function setTransportBusy(active, label = null) {
   state.transportBusy = active;
-  els.nextBtn.disabled = active;
+  state.transportStartedAt = active ? Date.now() : 0;
+  els.nextBtn.disabled = false;
+  els.nextBtn.setAttribute("aria-busy", active ? "true" : "false");
   if (label) els.nextBtn.textContent = label;
   else els.nextBtn.textContent = ">";
 }
@@ -1698,8 +1710,8 @@ async function playRecommendedNext(options = {}) {
   state.introducedTrackId = null;
   const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
   state.pendingPreviousTrack = current ? { ...current } : null;
+  const immediate = pickQuickNextTrack(current) ?? pickLooseNextTrack(current);
   if (options.reason !== "ended") {
-    const immediate = pickQuickNextTrack(current);
     if (immediate) {
       renderReply({
         say: "",
@@ -1715,7 +1727,8 @@ async function playRecommendedNext(options = {}) {
     }
   }
 
-  const candidate = await getRecommendedTrack(current);
+  const lookupMs = options.reason === "ended" ? 7000 : 2400;
+  const candidate = await withTimeout(getRecommendedTrack(current), lookupMs).catch(() => null);
   if (candidate) {
     renderReply({
       say: "",
@@ -1730,7 +1743,7 @@ async function playRecommendedNext(options = {}) {
     return;
   }
 
-  const alternate = await findNextPlayableTrack(current);
+  const alternate = immediate ?? await withTimeout(findNextPlayableTrack(current), lookupMs).catch(() => null);
   if (alternate) {
     renderReply({
       say: "",
@@ -1745,7 +1758,7 @@ async function playRecommendedNext(options = {}) {
     return;
   }
 
-  renderReply(await ask("\u6362\u4e00\u9996\uff0c\u907f\u5f00\u521a\u521a\u64ad\u8fc7\u7684\u6b4c", false), true, { autoPlay: true });
+  pushDj("这一轮没有找到能立即接上的歌，我先保持当前播放。再点一次下一首，我会放宽条件继续找。");
 }
 
 function interruptDjForTrackChange() {
@@ -1904,6 +1917,25 @@ function pickQuickNextTrack(current) {
   const pool = candidates.length ? candidates : tracks.filter((track) => trackKey(track) !== currentKey && isResolvableTrack(track));
   if (!pool.length) return null;
   const seed = Math.abs(hash(`${currentKey}:${Date.now()}:${state.recentTrackKeys.join("|")}`));
+  return { ...pool[seed % pool.length] };
+}
+
+function pickLooseNextTrack(current) {
+  const tracks = state.profile?.playlists ?? [];
+  if (!tracks.length) return null;
+  const currentKey = trackKey(current);
+  const candidates = tracks.filter((track) => {
+    const key = trackKey(track);
+    return key && key !== currentKey && !isRecentlyPlayed(key) && !rejectedTrackKeys.has(key);
+  });
+  const pool = candidates.length
+    ? candidates
+    : tracks.filter((track) => {
+      const key = trackKey(track);
+      return key && key !== currentKey && !rejectedTrackKeys.has(key);
+    });
+  if (!pool.length) return null;
+  const seed = Math.abs(hash(`loose:${currentKey}:${Date.now()}:${state.recentTrackKeys.join("|")}`));
   return { ...pool[seed % pool.length] };
 }
 
