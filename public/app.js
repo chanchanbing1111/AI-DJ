@@ -264,6 +264,11 @@ function setupEvents() {
     event.preventDefault();
     triggerNextTrack("button-pointer");
   });
+  document.addEventListener("click", (event) => {
+    if (!event.target?.closest?.("#nextBtn")) return;
+    event.preventDefault();
+    triggerNextTrack("button-document");
+  }, true);
   els.voiceBtn.addEventListener("click", async () => {
     if (state.speakingBusy) return;
     state.speakingBusy = true;
@@ -672,8 +677,14 @@ async function togglePlayback() {
   if (els.player.paused) {
     setPlaybackBusy(true);
     try {
-      await waitForOpeningReady();
-      await startCurrentTrack();
+      if (canResumeCurrentAudio()) {
+        await els.player.play();
+        syncCurrentTrackFromAudio();
+        updatePlaybackButtons();
+      } else {
+        await waitForOpeningReady();
+        await startCurrentTrack();
+      }
     } finally {
       setPlaybackBusy(false);
     }
@@ -688,6 +699,14 @@ function isPlayerAtTrackEnd() {
   const duration = els.player.duration;
   if (!Number.isFinite(duration) || duration < 5) return Boolean(els.player.ended);
   return Boolean(els.player.ended || duration - els.player.currentTime <= 0.35);
+}
+
+function canResumeCurrentAudio() {
+  if (!(els.player.currentSrc || els.player.src)) return false;
+  if (isPlayerAtTrackEnd()) return false;
+  const replyKey = trackKey(state.reply?.play);
+  const bound = audioBoundTrack() ?? state.currentTrack;
+  return Boolean(replyKey && bound && trackKey(bound) === replyKey);
 }
 
 function updatePlaybackButtons() {
@@ -730,18 +749,20 @@ function setTransportBusy(active, label = null) {
 
 async function triggerNextTrack(reason = "button") {
   const now = Date.now();
-  if (now - state.lastNextClickAt < 450) return;
+  if (now - state.lastNextClickAt < 250) return;
   state.lastNextClickAt = now;
   setTransportBusy(true, "...");
   invalidateOpeningPrewarm();
   state.introducedTrackId = null;
+  const current = currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play ?? null;
+  prepareForManualTrackChange(current);
 
   try {
-    if (forceLocalNextTrack({ reason })) return;
-    await withTimeout(playRecommendedNext({ reason }), 3000);
+    if (forceLocalNextTrack({ reason, current, alreadyInterrupted: true })) return;
+    await withTimeout(playRecommendedNext({ reason, current }), 3000);
   } catch (error) {
     console.error("[ai-dj] next trigger failed", error);
-    if (!forceLocalNextTrack({ reason: `${reason}-fallback` })) {
+    if (!forceLocalNextTrack({ reason: `${reason}-fallback`, current, alreadyInterrupted: true })) {
       pushDj("我这边暂时没有抓到下一首能接上的歌。你再点一次，我继续从歌单里找。");
     }
   } finally {
@@ -1579,6 +1600,25 @@ function clearAudioBinding(key = "") {
   delete els.player.dataset.trackKey;
 }
 
+function prepareForManualTrackChange(current = null) {
+  const key = trackKey(current) || state.playingTrackKey || els.player.dataset.trackKey || "";
+  interruptDjForTrackChange();
+  try {
+    els.player.pause();
+    els.player.removeAttribute("src");
+    els.player.load();
+  } catch {
+    // Some browsers throw if load() is interrupted during source changes.
+  }
+  if (key) clearLyrics(key);
+  clearAudioBinding();
+  state.lyrics = [];
+  state.lyricsTrackKey = "";
+  state.lyricActiveIndex = -1;
+  updatePlaybackButtons();
+  updateBroadcastDuration();
+}
+
 function isActivePlaybackSession(sessionId, track) {
   return sessionId === state.playSessionId && trackKey(state.reply?.play) === trackKey(track);
 }
@@ -1978,10 +2018,10 @@ function pickLooseNextTrack(current) {
 
 function forceLocalNextTrack(options = {}) {
   const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
-  const track = pickLooseNextTrack(current) ?? pickQuickNextTrack(current);
+  const track = pickQuickNextTrack(current) ?? pickLooseNextTrack(current);
   if (!track) return false;
   try {
-    interruptDjForTrackChange();
+    if (!options.alreadyInterrupted) interruptDjForTrackChange();
     state.introducedTrackId = null;
     state.pendingPreviousTrack = current ? { ...current } : null;
     renderReply({
