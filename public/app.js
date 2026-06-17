@@ -48,6 +48,7 @@ const state = {
   ttsAudio: null,
   ttsSource: null,
   lastDjBubbleText: "",
+  lastDjTrackKey: "",
   recentDjPhrases: [],
   baseVolume: 0.72
 };
@@ -617,13 +618,22 @@ function renderReply(reply, shouldScroll = true, options = {}) {
     return;
   }
 
-  state.reply = reply;
   const track = reply.play;
+  if (track && options.autoPlay && !String(reply.say ?? "").trim()) {
+    const immediate = buildImmediateVisibleIntro(track, [], reply.previousTrack ?? state.pendingPreviousTrack, options);
+    reply = {
+      ...reply,
+      say: immediate,
+      introPending: false
+    };
+  }
+
+  state.reply = reply;
   els.title.textContent = track?.title ?? "No track";
   els.meta.textContent = track ? `${track.artist} - PLAYING` : "WAITING";
   renderBroadcast(reply);
 
-  if (reply.say && !options.silent) pushDj(reply.say, shouldScroll);
+  if (reply.say && !options.silent) pushDjForTrack(reply.say, track, shouldScroll);
   if (track) {
     syncPlaybackBindingForReplyTrack(track);
     if (!options.silent) renderTrackCard(track, shouldScroll);
@@ -844,7 +854,7 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
 
   if (state.introducedTrackId !== track.id) {
     if (state.reply?.say && !state.reply?.introPending) {
-      pushDj(state.reply.say, shouldScroll);
+      pushDjForTrack(state.reply.say, track, shouldScroll);
       playDjIntro({ track, text: state.reply.say, sessionId, resumeMusic: false, leadInMs: 450, mode: "auto" }).catch(() => {});
     } else if (els.player.currentTime < 20) {
       hydrateIntroForPlayingTrack(track, { mode: "opening", sessionId, shouldPush: true }).catch(() => {});
@@ -876,7 +886,7 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
   state.djText = text;
   if (canAnnounceNow) {
     renderBroadcast(state.reply);
-    if (shouldPush) pushDj(text, true);
+    if (shouldPush) pushDjForTrack(text, track, true, { replace: true });
     playDjIntro({ track, text, sessionId, resumeMusic: false, leadInMs: 150, mode: "auto" }).catch(() => {});
   }
   return text;
@@ -1724,10 +1734,39 @@ function pushDj(text, shouldScroll = true) {
   const normalized = normalizeBubbleText(text);
   if (normalized && normalized === state.lastDjBubbleText) return;
   state.lastDjBubbleText = normalized;
+  state.lastDjTrackKey = "";
   rememberDjPhrase(text);
   els.chat.insertAdjacentHTML(
     "beforeend",
     `<div class="message dj"><div class="avatar"></div><div><div class="speaker">CLAUDIO</div><div class="bubble">${escapeHtml(text)}</div></div></div>`
+  );
+  if (shouldScroll) maybeScrollToLatest();
+}
+
+function pushDjForTrack(text, track, shouldScroll = true, options = {}) {
+  const normalized = normalizeBubbleText(text);
+  if (!normalized) return;
+  const key = trackKey(track);
+  if (options.replace && key) {
+    const messages = [...els.chat.querySelectorAll(".message.dj")];
+    const existing = [...messages].reverse().find((item) => item.dataset.trackKey === key);
+    const bubble = existing?.querySelector(".bubble");
+    if (bubble) {
+      bubble.textContent = text;
+      state.lastDjBubbleText = normalized;
+      state.lastDjTrackKey = key;
+      rememberDjPhrase(text);
+      if (shouldScroll) maybeScrollToLatest();
+      return;
+    }
+  }
+  if (normalized === state.lastDjBubbleText && key === state.lastDjTrackKey) return;
+  state.lastDjBubbleText = normalized;
+  state.lastDjTrackKey = key;
+  rememberDjPhrase(text);
+  els.chat.insertAdjacentHTML(
+    "beforeend",
+    `<div class="message dj" data-track-key="${escapeHtml(key)}"><div class="avatar"></div><div><div class="speaker">CLAUDIO</div><div class="bubble">${escapeHtml(text)}</div></div></div>`
   );
   if (shouldScroll) maybeScrollToLatest();
 }
@@ -1775,6 +1814,40 @@ function renderTrackCard(track, shouldScroll = true) {
     `<div class="track-card"><strong>* ${escapeHtml(track.title ?? track.name)}</strong><span>${escapeHtml(track.artist)}</span>${status}</div>`
   );
   if (shouldScroll) maybeScrollToLatest();
+}
+
+function buildImmediateVisibleIntro(track, lines = [], previousTrack = null, options = {}) {
+  const cleanLines = lines
+    .filter(Boolean)
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 4 && line.length <= 22)
+    .filter((line) => line !== track.title)
+    .filter((line) => !isLyricCredit(line));
+  const anchor = pickAutoAnchorLine(cleanLines, track.title) || cleanLines[0] || "";
+  const second = cleanLines.find((line) => line !== anchor) || "";
+  const firstTrack = !state.recentTrackKeys.length && !state.introducedTrackId && options.reason !== "ended";
+  const title = `${track.artist}的《${track.title}》`;
+
+  if (firstTrack) {
+    if (anchor && second) {
+      return `This is Claudio. ${title}先留在这里。${anchor.slice(0, 12)}和${second.slice(0, 12)}隔得很近，像一个人刚把话咽回去，又忍不住往外看了一眼。等完整播报写好之前，先让这首歌把频道稳住。`;
+    }
+    if (anchor) {
+      return `This is Claudio. ${title}先留在这里。我先抓住${anchor.slice(0, 12)}这一点，等完整播报写好之前，让歌声把频道稳住。`;
+    }
+    return `This is Claudio. ${title}先留在这里。完整播报还在路上，歌声先把频道接住。`;
+  }
+
+  const previous = previousTrack?.title && trackKey(previousTrack) !== trackKey(track)
+    ? `《${previousTrack.title}》后面`
+    : "这一段";
+  if (anchor && second) {
+    return `${previous}换到${title}。${anchor.slice(0, 12)}和${second.slice(0, 12)}贴在一起，一个往外走，一个还回头。完整播报马上补上，先别让电台断线。`;
+  }
+  if (anchor) {
+    return `${previous}换到${title}。我先留住${anchor.slice(0, 12)}这一小块，完整播报马上补上。`;
+  }
+  return `${previous}换到${title}。完整播报马上补上，先让声音不断。`;
 }
 
 async function playRecommendedNext(options = {}) {
@@ -2130,11 +2203,12 @@ async function commitPreparedNextTrack(track, lyrics, current, options = {}) {
   prepareForManualTrackChange(current, { clearTranscript: false });
   state.introducedTrackId = null;
   state.pendingPreviousTrack = current ? { ...current } : null;
+  const immediateSay = buildImmediateVisibleIntro(track, lyrics.map((line) => line.text).filter(Boolean), current, options);
   state.reply = {
-    say: "",
+    say: immediateSay,
     play: track,
     previousTrack: state.pendingPreviousTrack,
-    introPending: true,
+    introPending: false,
     reason: options.reason ?? "local prepared handoff",
     segue: "local prepared handoff",
     context: { mood: state.mood, weather: state.weather }
@@ -2143,6 +2217,7 @@ async function commitPreparedNextTrack(track, lyrics, current, options = {}) {
   els.title.textContent = track.title ?? "No track";
   els.meta.textContent = `${track.artist} - PLAYING`;
   renderBroadcast(state.reply);
+  pushDjForTrack(immediateSay, track, true);
   renderTrackCard(track, true);
 
   state.lyrics = lyrics;
@@ -2203,7 +2278,7 @@ async function hydrateAutoSegue(candidate, current, options = {}) {
   state.reply.introPending = false;
   state.djText = intro;
   renderBroadcast(state.reply);
-  pushDj(intro, true);
+  pushDjForTrack(intro, candidate, true, { replace: true });
   const activeTrack = currentPlaybackTrack() ?? state.currentTrack;
   if (trackKey(activeTrack) === trackKey(candidate) && state.introducedTrackId !== candidate.id) {
     playDjIntro({
