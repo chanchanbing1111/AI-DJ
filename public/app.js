@@ -48,6 +48,7 @@ const state = {
   ttsAudio: null,
   ttsSource: null,
   lastDjBubbleText: "",
+  recentDjPhrases: [],
   baseVolume: 0.72
 };
 
@@ -883,7 +884,7 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
 
 async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 9000, allowFallback = true, fast = mode === "opening" } = {}) {
   if (!track) return "";
-  if (state.reply?.say && trackKey(state.reply.play) === trackKey(track)) return state.reply.say;
+  if (state.reply?.say && trackKey(state.reply.play) === trackKey(track) && !isTemplateDjCopy(state.reply.say)) return state.reply.say;
   try {
     const intro = await withTimeout(api("/api/dj/intro", {
       method: "POST",
@@ -902,7 +903,7 @@ async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 
       && !els.player.paused
       && els.player.currentTime >= 20
       && state.introducedTrackId === track.id;
-    if (intro?.say && trackKey(state.reply?.play) === trackKey(track) && !staleOpening) {
+    if (intro?.say && trackKey(state.reply?.play) === trackKey(track) && !staleOpening && !isTemplateDjCopy(intro.say) && !isRecentlyUsedDjShape(intro.say)) {
       state.reply.say = intro.say;
       state.djText = intro.say;
       if (state.transcriptMode === "dj") renderBroadcast(state.reply);
@@ -1723,6 +1724,7 @@ function pushDj(text, shouldScroll = true) {
   const normalized = normalizeBubbleText(text);
   if (normalized && normalized === state.lastDjBubbleText) return;
   state.lastDjBubbleText = normalized;
+  rememberDjPhrase(text);
   els.chat.insertAdjacentHTML(
     "beforeend",
     `<div class="message dj"><div class="avatar"></div><div><div class="speaker">CLAUDIO</div><div class="bubble">${escapeHtml(text)}</div></div></div>`
@@ -1850,12 +1852,12 @@ async function buildAutoSegue(candidate, current, options = {}) {
         previousTrack: current ?? null,
         mode: "handoff",
         message: options.reason === "ended"
-          ? `上一首${current?.title ? `《${current.title}》` : "歌"}刚结束。请像 Claudio 深夜私人电台一样自然接下一首，要有承接和过渡，不要说“先放”、不要说“这首在讲”、不要解释意义。`
-          : `用户要换一首。请像 Claudio 深夜私人电台一样自然过渡到下一首，不要说“先放”、不要说“这首在讲”、不要解释意义。`,
+          ? `上一首${current?.title ? `《${current.title}》` : "歌"}刚结束。请像 Claudio 私人电台一样自然转到下一首。不要复用固定句式，不要说“先放”“这首在讲”“把方向拨开”“像两件旧物”“先听它怎么把话收住”。`
+          : `用户要换一首。请像 Claudio 私人电台一样自然转到下一首。不要复用固定句式，不要说“先放”“这首在讲”“把方向拨开”“像两件旧物”“先听它怎么把话收住”。`,
         context: { mood: state.mood, weather: state.weather }
       }
     }), 12000);
-    if (intro?.say) return intro.say;
+    if (intro?.say && !isTemplateDjCopy(intro.say)) return intro.say;
   } catch {
     // Fall back to a local segue if the LLM endpoint is unavailable.
   }
@@ -1863,7 +1865,7 @@ async function buildAutoSegue(candidate, current, options = {}) {
   const lines = await lyricPreviewLines(candidate);
   const anchor = pickAutoAnchorLine(lines, candidate.title);
   const previousTitle = current?.title ? `《${current.title}》` : "上一首";
-  const opening = options.reason === "ended" ? `${previousTitle}留下的情绪还在` : "我们把方向稍微拨开一点";
+  const opening = options.reason === "ended" ? `${previousTitle}的最后一层声音还在` : "换一段空气";
   const handoff = `${opening}。${candidate.artist}的《${candidate.title}》。`;
 
   if (/青花|黄昏/.test(candidate.title) && candidate.artist?.includes("周传雄")) {
@@ -1966,16 +1968,92 @@ function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = 
     .filter((line) => line && line !== anchor)
     .filter((line) => line.length >= 4 && line.length <= 18)
     .filter((line) => !isLyricCredit(line))
-    .slice(0, 3);
+    .slice(0, 6);
   const detail = anchor || images[0] || "";
   const second = images.find((line) => line !== detail) || "";
-  if (detail && second) {
-    return `${handoff}${detail}和${second}挨得很近，像两件旧物放在同一个抽屉里。先听它怎么把话收住，再看心里哪一处松动。`;
+  const third = images.find((line) => line !== detail && line !== second) || "";
+  const a = lyricFragment(detail);
+  const b = lyricFragment(second);
+  const c = lyricFragment(third);
+  const title = track?.title || "这一首";
+  const variants = [
+    () => a && b
+      ? `${handoff}${a}和${b}不是在讲同一件事：一个像刚伸出去的手，一个像又收回来的念头。${title}把这两下放在一起，听起来才会有那种轻轻的拧巴。`
+      : "",
+    () => a
+      ? `${handoff}我只留意到${a}这一小处。它没有急着把话说完，像人把门带上之前回头看了一眼。剩下的交给旋律，别让解释抢在歌前面。`
+      : "",
+    () => a && c
+      ? `${handoff}${a}往外走，${c}又把人拉回来。两股力拽在一起，歌就不只是好听，而是有一点站不稳的真实。`
+      : "",
+    () => `${handoff}这次不靠漂亮话开头。听它怎么把一句很小的心事放大，又在快要说破的时候收回去；那一下，比解释更像真人。`,
+    () => `${handoff}如果上一段还留着余温，这一段更像把手伸进口袋，摸到一张旧车票。不是怀旧，是忽然发现有些路还在心里。`
+  ].filter((build) => build());
+  return pickFreshDjVariant(variants, track);
+}
+
+function lyricFragment(line) {
+  return String(line || "")
+    .replace(/[「」“”"']/g, "")
+    .replace(/[，。！？、,.!?]/g, "")
+    .trim()
+    .slice(0, 10);
+}
+
+function pickFreshDjVariant(builders, track) {
+  const candidates = builders.map((build) => build()).filter(Boolean);
+  if (!candidates.length) return `${track?.artist || ""}的《${track?.title || "这一首"}》。先让旋律把话说完。`;
+  const seed = Math.abs(hash(`${trackKey(track)}:${state.recentDjPhrases.length}:${Date.now()}`));
+  for (let offset = 0; offset < candidates.length; offset += 1) {
+    const text = candidates[(seed + offset) % candidates.length];
+    if (!isTemplateDjCopy(text) && !isRecentlyUsedDjShape(text)) return text;
   }
-  if (detail) {
-    return `${handoff}${detail}停在那里，像纸上没擦干净的一道铅笔印。别替它补全，听完这一段就够。`;
-  }
-  return `${handoff}前一首的尾音还在，新的鼓点会把空气重新分开。先听一段，再决定要不要往下走。`;
+  return candidates[seed % candidates.length];
+}
+
+function rememberDjPhrase(text) {
+  const normalized = normalizeBubbleText(text);
+  if (!normalized || normalized.length < 20) return;
+  state.recentDjPhrases = [
+    normalized,
+    ...state.recentDjPhrases.filter((item) => item !== normalized)
+  ].slice(0, 8);
+}
+
+function isTemplateDjCopy(text) {
+  const normalized = String(text || "");
+  const banned = [
+    "我们把方向稍微拨开一点",
+    "把方向稍微拨开",
+    "像两件旧物",
+    "同一个抽屉",
+    "先听它怎么把话收住",
+    "再看心里哪一处松动",
+    "不用把它讲满",
+    "先听着",
+    "慢慢进来",
+    "这首歌大概",
+    "这首在讲",
+    "这几个字"
+  ];
+  return banned.some((phrase) => normalized.includes(phrase));
+}
+
+function isRecentlyUsedDjShape(text) {
+  const shape = djShape(text);
+  return state.recentDjPhrases.some((item) => {
+    const previous = djShape(item);
+    return previous && shape && previous.slice(0, 42) === shape.slice(0, 42);
+  });
+}
+
+function djShape(text) {
+  return String(text || "")
+    .replace(/《[^》]+》/g, "《》")
+    .replace(/[「“][^」”]+[」”]/g, "「」")
+    .replace(/[A-Za-z0-9\u4e00-\u9fa5]{1,12}的《》/g, "歌")
+    .replace(/\s+/g, "")
+    .slice(0, 90);
 }
 
 function pickQuickNextTrack(current) {
@@ -2116,7 +2194,7 @@ async function hydrateAutoSegue(candidate, current, options = {}) {
   const introRequestId = ++state.introRequestId;
   let intro = await withTimeout(buildAutoSegue(candidate, current, options), 18000);
   if (!intro || introRequestId !== state.introRequestId || trackKey(state.reply?.play) !== trackKey(candidate)) return;
-  if (/\bThis is Claudio\b/i.test(intro) || isWeakOpeningIntro(intro)) {
+  if (/\bThis is Claudio\b/i.test(intro) || isWeakOpeningIntro(intro) || isTemplateDjCopy(intro) || isRecentlyUsedDjShape(intro)) {
     const lines = await lyricPreviewLines(candidate);
     const anchor = pickAutoAnchorLine(lines, candidate.title);
     intro = buildFollowupFallback(candidate, lines, anchor, current);
