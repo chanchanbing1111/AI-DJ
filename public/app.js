@@ -37,6 +37,7 @@ const state = {
   openingReadyTrackKey: "",
   openingStartedAt: 0,
   introRequestId: 0,
+  lastNextClickAt: 0,
   lastAutoAdvancedKey: "",
   pendingPreviousTrack: null,
   recentTrackKeys: [],
@@ -219,7 +220,9 @@ function setupEvents() {
       invalidateOpeningPrewarm();
       setTransportBusy(true, "...");
       try {
-        await playRecommendedNext({ reason: "chat", userMessage: message });
+        if (!forceLocalNextTrack({ reason: "chat-immediate" })) {
+          await playRecommendedNext({ reason: "chat", userMessage: message });
+        }
       } catch (error) {
         console.error("[ai-dj] chat music handoff failed", error);
         if (!forceLocalNextTrack({ reason: "chat-fallback" })) {
@@ -251,21 +254,13 @@ function setupEvents() {
 
   els.playBtn.addEventListener("click", togglePlayback);
   els.broadcastPlay.addEventListener("click", togglePlayback);
-  els.nextBtn.addEventListener("click", async () => {
-    if (state.transportBusy && Date.now() - state.transportStartedAt < 1400) return;
-    setTransportBusy(true, "...");
-    invalidateOpeningPrewarm();
-    state.introducedTrackId = null;
-    try {
-      await playRecommendedNext();
-    } catch (error) {
-      console.error("[ai-dj] next button handoff failed", error);
-      if (!forceLocalNextTrack({ reason: "button-fallback" })) {
-        pushDj("我这边找下一首卡了一下，先从本地歌单再拨一次。");
-      }
-    } finally {
-      setTransportBusy(false);
-    }
+  els.nextBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    triggerNextTrack("button-click");
+  });
+  els.nextBtn.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    triggerNextTrack("button-pointer");
   });
   els.voiceBtn.addEventListener("click", async () => {
     if (state.speakingBusy) return;
@@ -719,6 +714,27 @@ function setTransportBusy(active, label = null) {
   els.nextBtn.setAttribute("aria-busy", active ? "true" : "false");
   if (label) els.nextBtn.textContent = label;
   else els.nextBtn.textContent = ">";
+}
+
+async function triggerNextTrack(reason = "button") {
+  const now = Date.now();
+  if (now - state.lastNextClickAt < 450) return;
+  state.lastNextClickAt = now;
+  setTransportBusy(true, "...");
+  invalidateOpeningPrewarm();
+  state.introducedTrackId = null;
+
+  try {
+    if (forceLocalNextTrack({ reason })) return;
+    await withTimeout(playRecommendedNext({ reason }), 3000);
+  } catch (error) {
+    console.error("[ai-dj] next trigger failed", error);
+    if (!forceLocalNextTrack({ reason: `${reason}-fallback` })) {
+      pushDj("我这边暂时没有抓到下一首能接上的歌。你再点一次，我继续从歌单里找。");
+    }
+  } finally {
+    setTransportBusy(false);
+  }
 }
 
 async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) {
