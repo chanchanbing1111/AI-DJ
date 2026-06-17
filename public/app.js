@@ -42,6 +42,7 @@ const state = {
   endAdvanceCheckKey: "",
   pendingPreviousTrack: null,
   recentTrackKeys: [],
+  nextQueueCursor: 0,
   lastTranscriptWheelAt: 0,
   volumeRamp: null,
   ttsAudio: null,
@@ -2016,12 +2017,11 @@ function localNextCandidates(current) {
   const currentKey = trackKey(current);
   const indexed = tracks.map((track, index) => ({ ...track, __queueIndex: index }));
   const currentIndex = indexed.findIndex((track) => trackKey(track) === currentKey);
-  const ordered = currentIndex >= 0
-    ? [...indexed.slice(currentIndex + 1), ...indexed.slice(0, currentIndex)]
-    : indexed;
+  const startIndex = currentIndex >= 0 ? currentIndex + 1 : state.nextQueueCursor % indexed.length;
+  const ordered = [...indexed.slice(startIndex), ...indexed.slice(0, startIndex)];
   const usable = ordered.filter((track) => {
     const key = trackKey(track);
-    return key && key !== currentKey && !rejectedTrackKeys.has(key);
+    return key && key !== currentKey;
   });
   const fresh = usable.filter((track) => !isRecentlyPlayed(trackKey(track)));
   return fresh.length ? fresh : usable;
@@ -2030,16 +2030,16 @@ function localNextCandidates(current) {
 async function prepareLocalNextCandidate(candidate) {
   if (!candidate) return null;
   const track = { ...candidate };
+  const queueIndex = track.__queueIndex;
   delete track.__queueIndex;
+  if (Number.isFinite(queueIndex)) track.__queueIndex = queueIndex;
   const key = trackKey(track);
   if (!key) return null;
   if (!await resolvePlayableUrl(track, { applyToPlayer: false })) {
-    rejectedTrackKeys.add(key);
     return null;
   }
   const lyrics = await getParsedLyrics(track).catch(() => []);
   if (!lyrics.length) {
-    rejectedTrackKeys.add(key);
     return null;
   }
   return { track, lyrics };
@@ -2078,6 +2078,13 @@ async function commitPreparedNextTrack(track, lyrics, current, options = {}) {
   const played = await playMusic(track, sessionId);
   if (!played || !isActivePlaybackSession(sessionId, track)) return false;
 
+  if (Number.isFinite(track.__queueIndex)) {
+    state.nextQueueCursor = (track.__queueIndex + 1) % Math.max(1, state.profile?.playlists?.length ?? 1);
+  } else {
+    const index = (state.profile?.playlists ?? []).findIndex((item) => trackKey(item) === key);
+    if (index >= 0) state.nextQueueCursor = (index + 1) % Math.max(1, state.profile?.playlists?.length ?? 1);
+  }
+
   hydrateAutoSegue(track, current, options).catch((error) => {
     console.warn("[ai-dj] prepared segue failed", error);
   });
@@ -2092,11 +2099,8 @@ async function forceLocalNextTrack(options = {}) {
       const prepared = await prepareLocalNextCandidate(candidate);
       if (!prepared) continue;
       if (await commitPreparedNextTrack(prepared.track, prepared.lyrics, current, options)) return true;
-      rejectedTrackKeys.add(trackKey(prepared.track));
     } catch (error) {
       console.error("[ai-dj] force local next candidate failed", error);
-      const key = trackKey(candidate);
-      if (key) rejectedTrackKeys.add(key);
     }
   }
   return false;
