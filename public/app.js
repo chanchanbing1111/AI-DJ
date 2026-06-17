@@ -657,14 +657,17 @@ function syncPlaybackBindingForReplyTrack(track) {
 
 function renderBroadcast(reply) {
   const track = reply.play;
-  state.djText = reply.say ?? "";
-  state.transcriptMode = "dj";
+  const hasDjCopy = Boolean((reply.say ?? "").trim());
   els.broadcastTitle.textContent = titleForBroadcast(reply);
   els.broadcastMeta.textContent = track ? `${track.title} - ${track.artist}` : "Waiting for track";
   updateBroadcastDuration();
   els.speakTimer.textContent = "0:00";
   els.speakState.innerHTML = reply.introPending ? "<span></span> Writing" : "<span></span> Ready";
-  renderDjTranscript(reply.say);
+  if (hasDjCopy || !reply.introPending) {
+    state.djText = reply.say ?? "";
+    state.transcriptMode = "dj";
+    renderDjTranscript(reply.say);
+  }
 }
 
 async function togglePlayback() {
@@ -755,14 +758,13 @@ async function triggerNextTrack(reason = "button") {
   invalidateOpeningPrewarm();
   state.introducedTrackId = null;
   const current = currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play ?? null;
-  prepareForManualTrackChange(current);
 
   try {
-    if (forceLocalNextTrack({ reason, current, alreadyInterrupted: true })) return;
+    if (forceLocalNextTrack({ reason, current })) return;
     await withTimeout(playRecommendedNext({ reason, current }), 3000);
   } catch (error) {
     console.error("[ai-dj] next trigger failed", error);
-    if (!forceLocalNextTrack({ reason: `${reason}-fallback`, current, alreadyInterrupted: true })) {
+    if (!forceLocalNextTrack({ reason: `${reason}-fallback`, current })) {
       pushDj("我这边暂时没有抓到下一首能接上的歌。你再点一次，我继续从歌单里找。");
     }
   } finally {
@@ -1010,7 +1012,6 @@ async function handleTrackEnded() {
   try {
     reportPlaybackEvent("ended", finished, "自然播放结束。");
     state.introducedTrackId = null;
-    clearLyrics(finishedKey);
     if (!forceLocalNextTrack({ current: finished, reason: "ended-immediate" })) {
       await playRecommendedNext({ current: finished, reason: "ended" });
     }
@@ -1600,7 +1601,7 @@ function clearAudioBinding(key = "") {
   delete els.player.dataset.trackKey;
 }
 
-function prepareForManualTrackChange(current = null) {
+function prepareForManualTrackChange(current = null, options = {}) {
   const key = trackKey(current) || state.playingTrackKey || els.player.dataset.trackKey || "";
   interruptDjForTrackChange();
   try {
@@ -1610,11 +1611,13 @@ function prepareForManualTrackChange(current = null) {
   } catch {
     // Some browsers throw if load() is interrupted during source changes.
   }
-  if (key) clearLyrics(key);
+  if (options.clearTranscript) {
+    if (key) clearLyrics(key);
+    state.lyrics = [];
+    state.lyricsTrackKey = "";
+    state.lyricActiveIndex = -1;
+  }
   clearAudioBinding();
-  state.lyrics = [];
-  state.lyricsTrackKey = "";
-  state.lyricActiveIndex = -1;
   updatePlaybackButtons();
   updateBroadcastDuration();
 }
@@ -2021,7 +2024,7 @@ function forceLocalNextTrack(options = {}) {
   const track = pickQuickNextTrack(current) ?? pickLooseNextTrack(current);
   if (!track) return false;
   try {
-    if (!options.alreadyInterrupted) interruptDjForTrackChange();
+    prepareForManualTrackChange(current, { clearTranscript: false });
     state.introducedTrackId = null;
     state.pendingPreviousTrack = current ? { ...current } : null;
     renderReply({
