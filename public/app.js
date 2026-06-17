@@ -221,12 +221,12 @@ function setupEvents() {
       invalidateOpeningPrewarm();
       setTransportBusy(true, "...");
       try {
-        if (!forceLocalNextTrack({ reason: "chat-immediate" })) {
+        if (!await forceLocalNextTrack({ reason: "chat-immediate" })) {
           await playRecommendedNext({ reason: "chat", userMessage: message });
         }
       } catch (error) {
         console.error("[ai-dj] chat music handoff failed", error);
-        if (!forceLocalNextTrack({ reason: "chat-fallback" })) {
+        if (!await forceLocalNextTrack({ reason: "chat-fallback" })) {
           pushDj("我这边切歌慢了一拍，先别断线。你再点一次，我会直接从歌单里跳过去。");
         }
       } finally {
@@ -260,15 +260,6 @@ function setupEvents() {
     event.preventDefault();
     triggerNextTrack("button-click");
   });
-  els.nextBtn.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    triggerNextTrack("button-pointer");
-  });
-  document.addEventListener("click", (event) => {
-    if (!event.target?.closest?.("#nextBtn")) return;
-    event.preventDefault();
-    triggerNextTrack("button-document");
-  }, true);
   els.voiceBtn.addEventListener("click", async () => {
     if (state.speakingBusy) return;
     state.speakingBusy = true;
@@ -760,11 +751,11 @@ async function triggerNextTrack(reason = "button") {
   const current = currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play ?? null;
 
   try {
-    if (forceLocalNextTrack({ reason, current })) return;
+    if (await forceLocalNextTrack({ reason, current })) return;
     await withTimeout(playRecommendedNext({ reason, current }), 3000);
   } catch (error) {
     console.error("[ai-dj] next trigger failed", error);
-    if (!forceLocalNextTrack({ reason: `${reason}-fallback`, current })) {
+    if (!await forceLocalNextTrack({ reason: `${reason}-fallback`, current })) {
       pushDj("我这边暂时没有抓到下一首能接上的歌。你再点一次，我继续从歌单里找。");
     }
   } finally {
@@ -1012,7 +1003,7 @@ async function handleTrackEnded() {
   try {
     reportPlaybackEvent("ended", finished, "自然播放结束。");
     state.introducedTrackId = null;
-    if (!forceLocalNextTrack({ current: finished, reason: "ended-immediate" })) {
+    if (!await forceLocalNextTrack({ current: finished, reason: "ended-immediate" })) {
       await playRecommendedNext({ current: finished, reason: "ended" });
     }
   } finally {
@@ -2019,31 +2010,96 @@ function pickLooseNextTrack(current) {
   return { ...pool[seed % pool.length] };
 }
 
-function forceLocalNextTrack(options = {}) {
-  const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
-  const track = pickQuickNextTrack(current) ?? pickLooseNextTrack(current);
-  if (!track) return false;
-  try {
-    prepareForManualTrackChange(current, { clearTranscript: false });
-    state.introducedTrackId = null;
-    state.pendingPreviousTrack = current ? { ...current } : null;
-    renderReply({
-      say: "",
-      play: track,
-      previousTrack: state.pendingPreviousTrack,
-      introPending: true,
-      reason: options.reason ?? "forced local handoff",
-      segue: "local immediate fallback",
-      context: { mood: state.mood, weather: state.weather }
-    }, true, { autoPlay: true, forceRender: true });
-    hydrateAutoSegue(track, current, options).catch((error) => {
-      console.warn("[ai-dj] fallback segue failed", error);
-    });
-    return true;
-  } catch (error) {
-    console.error("[ai-dj] force local next failed", error);
-    return false;
+function localNextCandidates(current) {
+  const tracks = state.profile?.playlists ?? [];
+  if (!tracks.length) return [];
+  const currentKey = trackKey(current);
+  const indexed = tracks.map((track, index) => ({ ...track, __queueIndex: index }));
+  const currentIndex = indexed.findIndex((track) => trackKey(track) === currentKey);
+  const ordered = currentIndex >= 0
+    ? [...indexed.slice(currentIndex + 1), ...indexed.slice(0, currentIndex)]
+    : indexed;
+  const usable = ordered.filter((track) => {
+    const key = trackKey(track);
+    return key && key !== currentKey && !rejectedTrackKeys.has(key);
+  });
+  const fresh = usable.filter((track) => !isRecentlyPlayed(trackKey(track)));
+  return fresh.length ? fresh : usable;
+}
+
+async function prepareLocalNextCandidate(candidate) {
+  if (!candidate) return null;
+  const track = { ...candidate };
+  delete track.__queueIndex;
+  const key = trackKey(track);
+  if (!key) return null;
+  if (!await resolvePlayableUrl(track, { applyToPlayer: false })) {
+    rejectedTrackKeys.add(key);
+    return null;
   }
+  const lyrics = await getParsedLyrics(track).catch(() => []);
+  if (!lyrics.length) {
+    rejectedTrackKeys.add(key);
+    return null;
+  }
+  return { track, lyrics };
+}
+
+async function commitPreparedNextTrack(track, lyrics, current, options = {}) {
+  const key = trackKey(track);
+  if (!key || !track.url || !lyrics?.length) return false;
+
+  prepareForManualTrackChange(current, { clearTranscript: false });
+  state.introducedTrackId = null;
+  state.pendingPreviousTrack = current ? { ...current } : null;
+  state.reply = {
+    say: "",
+    play: track,
+    previousTrack: state.pendingPreviousTrack,
+    introPending: true,
+    reason: options.reason ?? "local prepared handoff",
+    segue: "local prepared handoff",
+    context: { mood: state.mood, weather: state.weather }
+  };
+
+  els.title.textContent = track.title ?? "No track";
+  els.meta.textContent = `${track.artist} - PLAYING`;
+  renderBroadcast(state.reply);
+  renderTrackCard(track, true);
+
+  state.lyrics = lyrics;
+  state.lyricsTrackKey = key;
+  state.lyricActiveIndex = -1;
+  state.transcriptMode = "lyrics";
+  bindAudioTrack(track);
+  renderLyrics();
+
+  const sessionId = ++state.playSessionId;
+  const played = await playMusic(track, sessionId);
+  if (!played || !isActivePlaybackSession(sessionId, track)) return false;
+
+  hydrateAutoSegue(track, current, options).catch((error) => {
+    console.warn("[ai-dj] prepared segue failed", error);
+  });
+  return true;
+}
+
+async function forceLocalNextTrack(options = {}) {
+  const current = options.current ?? currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
+  const candidates = localNextCandidates(current);
+  for (const candidate of candidates) {
+    try {
+      const prepared = await prepareLocalNextCandidate(candidate);
+      if (!prepared) continue;
+      if (await commitPreparedNextTrack(prepared.track, prepared.lyrics, current, options)) return true;
+      rejectedTrackKeys.add(trackKey(prepared.track));
+    } catch (error) {
+      console.error("[ai-dj] force local next candidate failed", error);
+      const key = trackKey(candidate);
+      if (key) rejectedTrackKeys.add(key);
+    }
+  }
+  return false;
 }
 
 function quickAutoSegue(candidate, current, options = {}) {
