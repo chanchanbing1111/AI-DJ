@@ -39,6 +39,7 @@ const state = {
   introRequestId: 0,
   lastNextClickAt: 0,
   lastAutoAdvancedKey: "",
+  endAdvanceCheckKey: "",
   pendingPreviousTrack: null,
   recentTrackKeys: [],
   lastTranscriptWheelAt: 0,
@@ -234,9 +235,10 @@ function setupEvents() {
       return;
     }
     try {
-      const reply = await withTimeout(askWithOptions(message, { shouldPush: false }), 18000);
+      const reply = await withTimeout(askWithOptions(message, { shouldPush: false }), 65000);
       renderReply(reply, true, { autoPlay: false });
     } catch (error) {
+      console.error("[ai-dj] chat failed", error);
       pushDj("大模型刚才没接稳，但我还在。你再问一遍，我继续接着这首歌聊。", true);
     }
   });
@@ -663,6 +665,10 @@ function renderBroadcast(reply) {
 async function togglePlayback() {
   if (!state.reply?.play) return;
   if (state.playbackBusy) return;
+  if (isPlayerAtTrackEnd()) {
+    triggerNextTrack("ended-play-button");
+    return;
+  }
   if (els.player.paused) {
     setPlaybackBusy(true);
     try {
@@ -676,6 +682,12 @@ async function togglePlayback() {
 
   els.player.pause();
   updatePlaybackButtons();
+}
+
+function isPlayerAtTrackEnd() {
+  const duration = els.player.duration;
+  if (!Number.isFinite(duration) || duration < 5) return Boolean(els.player.ended);
+  return Boolean(els.player.ended || duration - els.player.currentTime <= 0.35);
 }
 
 function updatePlaybackButtons() {
@@ -978,7 +990,9 @@ async function handleTrackEnded() {
     reportPlaybackEvent("ended", finished, "自然播放结束。");
     state.introducedTrackId = null;
     clearLyrics(finishedKey);
-    await playRecommendedNext({ current: finished, reason: "ended" });
+    if (!forceLocalNextTrack({ current: finished, reason: "ended-immediate" })) {
+      await playRecommendedNext({ current: finished, reason: "ended" });
+    }
   } finally {
     state.autoAdvancing = false;
   }
@@ -999,6 +1013,7 @@ async function playMusic(track = state.reply?.play, sessionId = state.playSessio
     }
     state.playingTrackKey = key;
     state.lastAutoAdvancedKey = "";
+    state.endAdvanceCheckKey = "";
     rememberPlayedTrack(track);
     syncCurrentTrackFromAudio();
     updatePlaybackButtons();
@@ -2289,12 +2304,18 @@ function updateProgress() {
 
 function maybeAutoAdvanceAtEnd() {
   if (state.autoAdvancing || state.autoSkipping) return;
-  const duration = els.player.duration;
-  if (!Number.isFinite(duration) || duration < 20) return;
-  const atEnd = els.player.ended || duration - els.player.currentTime <= 1.2;
-  if (atEnd) {
+  if (!isPlayerAtTrackEnd()) return;
+  const finished = currentPlaybackTrack() ?? state.currentTrack ?? state.reply?.play;
+  const finishedKey = trackKey(finished);
+  if (!finishedKey || state.endAdvanceCheckKey === finishedKey) return;
+  state.endAdvanceCheckKey = finishedKey;
+  window.setTimeout(() => {
+    if (!isPlayerAtTrackEnd()) {
+      state.endAdvanceCheckKey = "";
+      return;
+    }
     handleTrackEnded().catch(() => {});
-  }
+  }, 0);
 }
 
 function updateBroadcastDuration() {
