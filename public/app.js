@@ -666,11 +666,20 @@ function renderBroadcast(reply) {
   updateBroadcastDuration();
   els.speakTimer.textContent = "0:00";
   els.speakState.innerHTML = reply.introPending ? "<span></span> Writing" : "<span></span> Ready";
-  if (hasDjCopy || !reply.introPending) {
-    state.djText = reply.say ?? "";
-    state.transcriptMode = "dj";
-    renderDjTranscript(reply.say);
+  if (!hasDjCopy) {
+    const key = trackKey(track);
+    if (key && state.lyricsTrackKey !== key) {
+      state.lyrics = [];
+      state.lyricsTrackKey = key;
+      state.lyricActiveIndex = -1;
+    }
+    state.transcriptMode = "lyrics";
+    renderLyrics();
+    return;
   }
+  state.djText = reply.say ?? "";
+  state.transcriptMode = "dj";
+  renderDjTranscript(reply.say);
 }
 
 async function togglePlayback() {
@@ -810,21 +819,47 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
     ? state.reply?.previousTrack
     : (trackKey(state.pendingPreviousTrack) !== key ? state.pendingPreviousTrack : null);
   const isStationOpening = !state.recentTrackKeys.length && !state.introducedTrackId;
-  const lyrics = await getParsedLyrics(track);
+  const lyricsPromise = getParsedLyrics(track).catch(() => []);
+  let lyrics = await Promise.race([
+    lyricsPromise,
+    wait(1800).then(() => null)
+  ]);
+  const lyricsTimedOut = lyrics === null;
+  if (lyrics === null) {
+    lyrics = [];
+    state.lyrics = [];
+    state.lyricsTrackKey = key;
+    state.lyricActiveIndex = -1;
+    state.transcriptMode = "lyrics";
+    renderLyrics();
+    lyricsPromise.then((lateLyrics) => {
+      if (!lateLyrics.length) return;
+      if (!isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return;
+      state.lyrics = lateLyrics;
+      state.lyricsTrackKey = key;
+      state.lyricActiveIndex = -1;
+      if (state.transcriptMode === "lyrics") renderLyrics();
+    }).catch(() => {});
+  }
   if (!lyrics.length) {
-    const alternate = await findNextPlayableTrack(track);
-    if (alternate && isActivePlaybackSession(sessionId, track)) {
-      renderReply({
-        say: `刚才那首没有完整歌词，我不硬放。${alternate.artist}的《${alternate.title}》。这首字幕能跟上。`,
-        play: alternate,
-        reason: "跳过无歌词歌曲。",
-        segue: "保持电台有歌也有词。",
-        context: { mood: state.mood, weather: state.weather }
-      }, true, { forceRender: true, autoPlay: true });
+    if (lyricsTimedOut) {
+      // Do not punish a slow lyric API by skipping a track that is already playing.
+      // The late promise above will fill the card as soon as NetEase responds.
+    } else {
+      const alternate = await findNextPlayableTrack(track);
+      if (alternate && isActivePlaybackSession(sessionId, track)) {
+        renderReply({
+          say: `刚才那首没有完整歌词，我不硬放。${alternate.artist}的《${alternate.title}》。这首字幕能跟上。`,
+          play: alternate,
+          reason: "跳过无歌词歌曲。",
+          segue: "保持电台有歌也有词。",
+          context: { mood: state.mood, weather: state.weather }
+        }, true, { forceRender: true, autoPlay: true });
+        return;
+      }
+      pushDj("这首没有完整歌词，我不硬放。等下一首能把声音和字一起接住。");
       return;
     }
-    pushDj("这首没有完整歌词，我不硬放。等下一首能把声音和字一起接住。");
-    return;
   }
   const lyricLines = lyrics.map((line) => line.text).filter(Boolean);
   const shouldRewriteIntro = !state.reply?.say
@@ -876,16 +911,23 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
     allowFallback: true,
     fast: mode === "opening"
   });
-  if (!text || introRequestId !== state.introRequestId || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) return "";
+  if (!text || introRequestId !== state.introRequestId || !isActivePlaybackSession(sessionId, track) || trackKey(state.reply?.play) !== key) {
+    if (trackKey(state.reply?.play) === key) {
+      state.reply.introPending = false;
+      els.speakState.innerHTML = "<span></span> Ready";
+      if (state.transcriptMode === "lyrics") renderLyrics();
+    }
+    return "";
+  }
   const canAnnounceNow = state.introducedTrackId !== track.id && els.player.currentTime < 20;
   if (state.reply) {
     state.reply.say = text;
     state.reply.introPending = false;
   }
   state.djText = text;
+  renderBroadcast(state.reply);
+  if (shouldPush) pushDjForTrack(text, track, true, { replace: true });
   if (canAnnounceNow) {
-    renderBroadcast(state.reply);
-    if (shouldPush) pushDjForTrack(text, track, true, { replace: true });
     playDjIntro({ track, text, sessionId, resumeMusic: false, leadInMs: 150, mode: "auto" }).catch(() => {});
   }
   return text;
@@ -1419,6 +1461,11 @@ function clearLyrics(key = state.lyricsTrackKey) {
 }
 
 function renderLyrics() {
+  if (!state.lyrics.length) {
+    els.transcript.innerHTML = `<div class="line lyric-line pending"><b>Claudio</b><span>歌词还在加载。</span></div>`;
+    updateBroadcastDuration();
+    return;
+  }
   const activeIndex = state.lyricActiveIndex >= 0 ? state.lyricActiveIndex : computeLyricActiveIndex();
   state.lyricActiveIndex = activeIndex;
   const anchorIndex = Math.max(0, activeIndex);
@@ -2199,21 +2246,22 @@ async function prepareLocalNextCandidate(candidate) {
   if (!await resolvePlayableUrl(track, { applyToPlayer: false })) {
     return null;
   }
-  const lyrics = await getParsedLyrics(track).catch(() => []);
-  if (!lyrics.length) {
-    return null;
-  }
-  return { track, lyrics };
+  const lyricsPromise = getParsedLyrics(track).catch(() => []);
+  const lyrics = await Promise.race([
+    lyricsPromise,
+    wait(1200).then(() => [])
+  ]);
+  return { track, lyrics, lyricsPromise };
 }
 
 async function commitPreparedNextTrack(track, lyrics, current, options = {}) {
   const key = trackKey(track);
-  if (!key || !track.url || !lyrics?.length) return false;
+  if (!key || !track.url) return false;
 
   prepareForManualTrackChange(current, { clearTranscript: false });
   state.introducedTrackId = null;
   state.pendingPreviousTrack = current ? { ...current } : null;
-  const immediateSay = buildImmediateVisibleIntro(track, lyrics.map((line) => line.text).filter(Boolean), current, options);
+  const immediateSay = buildImmediateVisibleIntro(track, (lyrics ?? []).map((line) => line.text).filter(Boolean), current, options);
   state.reply = {
     say: immediateSay,
     play: track,
@@ -2230,16 +2278,29 @@ async function commitPreparedNextTrack(track, lyrics, current, options = {}) {
   pushDjForTrack(immediateSay, track, true);
   renderTrackCard(track, true);
 
-  state.lyrics = lyrics;
+  state.lyrics = lyrics ?? [];
   state.lyricsTrackKey = key;
   state.lyricActiveIndex = -1;
   state.transcriptMode = "lyrics";
   bindAudioTrack(track);
   renderLyrics();
+  if (!state.lyrics.length && options.lyricsPromise) {
+    options.lyricsPromise.then((lateLyrics) => {
+      if (!lateLyrics.length) return;
+      if (trackKey(state.reply?.play) !== key || state.playingTrackKey !== key) return;
+      state.lyrics = lateLyrics;
+      state.lyricsTrackKey = key;
+      state.lyricActiveIndex = -1;
+      if (state.transcriptMode === "lyrics") renderLyrics();
+    }).catch(() => {});
+  }
 
   const sessionId = ++state.playSessionId;
   const played = await playMusic(track, sessionId);
   if (!played || !isActivePlaybackSession(sessionId, track)) return false;
+  if (immediateSay && state.introducedTrackId !== track.id) {
+    playDjIntro({ track, text: immediateSay, sessionId, resumeMusic: false, leadInMs: 150, mode: "auto" }).catch(() => {});
+  }
 
   if (Number.isFinite(track.__queueIndex)) {
     state.nextQueueCursor = (track.__queueIndex + 1) % Math.max(1, state.profile?.playlists?.length ?? 1);
@@ -2261,7 +2322,7 @@ async function forceLocalNextTrack(options = {}) {
     try {
       const prepared = await prepareLocalNextCandidate(candidate);
       if (!prepared) continue;
-      if (await commitPreparedNextTrack(prepared.track, prepared.lyrics, current, options)) return true;
+      if (await commitPreparedNextTrack(prepared.track, prepared.lyrics, current, { ...options, lyricsPromise: prepared.lyricsPromise })) return true;
     } catch (error) {
       console.error("[ai-dj] force local next candidate failed", error);
     }
