@@ -1,4 +1,4 @@
-const CACHE_NAME = "ai-dj-v46";
+const CACHE_NAME = "ai-dj-v47";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

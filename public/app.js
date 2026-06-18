@@ -840,7 +840,6 @@ async function startCurrentTrack({ announce = true, shouldScroll = true } = {}) 
     state.reply.introPending = false;
     state.djText = immediateSay;
     state.openingReadyTrackKey = key;
-    state.introRequestId += 1;
     prefetchTtsAudio(immediateSay).catch(() => {});
   }
   state.lyrics = lyrics;
@@ -894,7 +893,12 @@ async function hydrateIntroForPlayingTrack(track, { mode = "opening", sessionId 
 
 async function ensureIntroTextForTrack(track, { mode = "recommend", timeoutMs = 9000, allowFallback = true, fast = mode === "opening" } = {}) {
   if (!track) return "";
-  if (state.reply?.say && trackKey(state.reply.play) === trackKey(track) && !isTemplateDjCopy(state.reply.say)) return state.reply.say;
+  if (
+    state.reply?.say
+    && trackKey(state.reply.play) === trackKey(track)
+    && !isTemplateDjCopy(state.reply.say)
+    && !isWeakOpeningIntro(state.reply.say)
+  ) return state.reply.say;
   try {
     const intro = await withTimeout(api("/api/dj/intro", {
       method: "POST",
@@ -1824,30 +1828,10 @@ function buildImmediateVisibleIntro(track, lines = [], previousTrack = null, opt
     .filter((line) => line !== track.title)
     .filter((line) => !isLyricCredit(line));
   const anchor = pickAutoAnchorLine(cleanLines, track.title) || cleanLines[0] || "";
-  const second = cleanLines.find((line) => line !== anchor) || "";
   const firstTrack = !state.recentTrackKeys.length && !state.introducedTrackId && options.reason !== "ended";
-  const title = `${track.artist}的《${track.title}》`;
-
-  if (firstTrack) {
-    if (anchor && second) {
-      return `This is Claudio. ${title}先留在这里。${anchor.slice(0, 12)}和${second.slice(0, 12)}隔得很近，像一个人刚把话咽回去，又忍不住往外看了一眼。等完整播报写好之前，先让这首歌把频道稳住。`;
-    }
-    if (anchor) {
-      return `This is Claudio. ${title}先留在这里。我先抓住${anchor.slice(0, 12)}这一点，等完整播报写好之前，让歌声把频道稳住。`;
-    }
-    return `This is Claudio. ${title}先留在这里。完整播报还在路上，歌声先把频道接住。`;
-  }
-
-  const previous = previousTrack?.title && trackKey(previousTrack) !== trackKey(track)
-    ? `《${previousTrack.title}》后面`
-    : "这一段";
-  if (anchor && second) {
-    return `${previous}换到${title}。${anchor.slice(0, 12)}和${second.slice(0, 12)}贴在一起，一个往外走，一个还回头。完整播报马上补上，先别让电台断线。`;
-  }
-  if (anchor) {
-    return `${previous}换到${title}。我先留住${anchor.slice(0, 12)}这一小块，完整播报马上补上。`;
-  }
-  return `${previous}换到${title}。完整播报马上补上，先让声音不断。`;
+  return firstTrack
+    ? buildOpeningFallback(track, cleanLines, anchor)
+    : buildFollowupFallback(track, cleanLines, anchor, previousTrack);
 }
 
 async function playRecommendedNext(options = {}) {
@@ -1969,12 +1953,12 @@ function buildOpeningFallback(track, lines = [], anchor = "") {
         : `${weekday}早上，桌面还亮着`;
   const image = anchor || pickAutoAnchorLine(lines, track.title);
   if (track.artist?.includes("陈粒") && track.title?.includes("空空")) {
-    return `This is Claudio. ${scene}。陈粒的《空空》。它不是把人写成一片空白，而是写那种突然和自己隔开一点的时刻：梦还在，风也还在，可手心里少了一块确定的东西。先让它在这里响一会儿。`;
+    return `This is Claudio. ${scene}。陈粒的《空空》。歌里那句「回忆组成风，欲望组成梦」像一盏灯忽明忽暗，照到人心里还没整理好的地方。今天从这里开始，把那点空白交给声音。`;
   }
   const detail = image
     ? `歌里那句「${image.slice(0, 14)}」轻轻露出来，后面藏着一点还没安放好的心事。`
     : "它的声音不抢人，像门虚掩着，留一点余地给你。";
-  return `This is Claudio. ${scene}。${track.artist}的《${track.title}》。${detail}这几分钟，电台先陪你留在这里。`;
+  return `This is Claudio. ${scene}。${track.artist}的《${track.title}》。${detail}这一首留给耳朵，不急着把感受说满。`;
 }
 
 function buildFollowupFallback(track, lines = [], anchor = "", previousTrack = null) {
@@ -1986,25 +1970,25 @@ function buildFollowupFallback(track, lines = [], anchor = "", previousTrack = n
     .find((line) => line !== track.title) || "";
   const hasRealPrevious = previousTrack && trackKey(previousTrack) !== trackKey(track);
   const previous = hasRealPrevious && previousTrack?.title ? `《${previousTrack.title}》` : "上一首";
-  const handoff = hasRealPrevious ? `${previous}的尾音还没完全散` : "情绪换了一个方向";
+  const handoff = hasRealPrevious ? `${previous}收住以后` : "换一首";
 
   if (track.artist?.includes("贰月の羊") && track.title?.includes("重生")) {
-    return `${handoff}，这里转到贰月の羊的《重生》。那些像梦一样没安放好的画面，不是要立刻翻篇；它们只是换了一种声音，提醒人可以从旧壳里出来一点。`;
+    return `${handoff}，贰月の羊的《重生》把声音放低。那些没安放好的画面没有被催着翻篇，只是换了一种光，让人从旧壳里透一口气。`;
   }
   if (track.artist?.includes("陈粒") && track.title?.includes("果实")) {
-    return `${handoff}，陈粒的《果实》接过来。歌里反复要一个安全的所在，听起来很轻，其实是在给慌乱找一只手。剩下的不用急着说破。`;
+    return `${handoff}，陈粒的《果实》落下来。歌里反复要一个安全的所在，听起来很轻，其实是在给慌乱找一只手。`;
   }
   if (track.artist?.includes("陈粒") && track.title?.includes("空空")) {
-    return `${handoff}，陈粒的《空空》留在这里。前一秒还在放空，下一秒忽然失落；风和梦都在路上，只是暂时没有哪一个能把人托稳。`;
+    return `${handoff}，陈粒的《空空》接住那点失重。前一秒还在放空，下一秒忽然失落；风和梦都在路上，只是暂时没有哪一个能把人托稳。`;
   }
 
   if (image && secondary) {
-    return `${handoff}，现在到${track.artist}的《${track.title}》。${image.slice(0, 14)}和${secondary.slice(0, 14)}挨在一起，像两种心事互相照了一下：一个还想往前，一个还没放下。`;
+    return `${handoff}，${track.artist}的《${track.title}》把「${image.slice(0, 14)}」和「${secondary.slice(0, 14)}」放在一前一后。不是结论，更像情绪换气时露出的一点侧脸。`;
   }
   if (image) {
-    return `${handoff}，现在到${track.artist}的《${track.title}》。我只取${image.slice(0, 14)}这一点，不把它解释成大道理；让它在耳边停一下就够。`;
+    return `${handoff}，${track.artist}的《${track.title}》。我只抓住「${image.slice(0, 14)}」这一处，它不负责解释整首歌，只负责把心里某个地方点亮一下。`;
   }
-  return `${handoff}，现在到${track.artist}的《${track.title}》。这次不重新开场，只把上一段没有说完的情绪换一副声线继续。`;
+  return `${handoff}，${track.artist}的《${track.title}》把空气换了个颜色。上一段还没完全离开，这一段已经把门推开一点。`;
 }
 
 function isWeakOpeningIntro(text) {
@@ -2031,7 +2015,17 @@ function isWeakOpeningIntro(text) {
     "这几分钟，电台先",
     "先让它在这里响",
     "放在第一首",
-    "留在这里响"
+    "留在这里响",
+    "完整播报",
+    "马上补上",
+    "电台断线",
+    "频道稳住",
+    "先留在这里",
+    "我先留住",
+    "先让声音不断",
+    "先让旋律把话说完",
+    "把方向稍微拨开",
+    "同一个抽屉"
   ];
   return weakPhrases.some((phrase) => normalized.includes(phrase));
 }
@@ -2051,16 +2045,16 @@ function buildLocalDjFallback({ handoff, lines = [], anchor = "", track, mode = 
   const title = track?.title || "这一首";
   const variants = [
     () => a && b
-      ? `${handoff}${a}和${b}不是在讲同一件事：一个像刚伸出去的手，一个像又收回来的念头。${title}把这两下放在一起，听起来才会有那种轻轻的拧巴。`
+      ? `${handoff}${track?.artist || ""}的《${title}》。${a}之后接着${b}，两句之间空了一小步，像一个人把话吞回去，又换了种方式说出来。`
       : "",
     () => a
-      ? `${handoff}我只留意到${a}这一小处。它没有急着把话说完，像人把门带上之前回头看了一眼。剩下的交给旋律，别让解释抢在歌前面。`
+      ? `${handoff}${track?.artist || ""}的《${title}》。${a}不是漂亮句子，更像歌里突然露出的表情；听到这里，情绪已经够清楚了。`
       : "",
     () => a && c
-      ? `${handoff}${a}往外走，${c}又把人拉回来。两股力拽在一起，歌就不只是好听，而是有一点站不稳的真实。`
+      ? `${handoff}${track?.artist || ""}的《${title}》。${a}往外走，${c}又把人拉回来。歌没有把痛说满，只留下一点摇晃。`
       : "",
-    () => `${handoff}这次不靠漂亮话开头。听它怎么把一句很小的心事放大，又在快要说破的时候收回去；那一下，比解释更像真人。`,
-    () => `${handoff}如果上一段还留着余温，这一段更像把手伸进口袋，摸到一张旧车票。不是怀旧，是忽然发现有些路还在心里。`
+    () => `${handoff}${track?.artist || ""}的《${title}》。这首歌不需要被端得很满，留下来的那点停顿，反而比解释更接近人。`,
+    () => `${handoff}${track?.artist || ""}的《${title}》。把注意力放到声线和字缝里，很多话不必翻译，身体会先听懂。`
   ].filter((build) => build());
   return pickFreshDjVariant(variants, track);
 }
@@ -2075,7 +2069,7 @@ function lyricFragment(line) {
 
 function pickFreshDjVariant(builders, track) {
   const candidates = builders.map((build) => build()).filter(Boolean);
-  if (!candidates.length) return `${track?.artist || ""}的《${track?.title || "这一首"}》。先让旋律把话说完。`;
+  if (!candidates.length) return `${track?.artist || ""}的《${track?.title || "这一首"}》。把注意力放轻一点，听它自己展开。`;
   const seed = Math.abs(hash(`${trackKey(track)}:${state.recentDjPhrases.length}:${Date.now()}`));
   for (let offset = 0; offset < candidates.length; offset += 1) {
     const text = candidates[(seed + offset) % candidates.length];
@@ -2107,7 +2101,23 @@ function isTemplateDjCopy(text) {
     "慢慢进来",
     "这首歌大概",
     "这首在讲",
-    "这几个字"
+    "这几个字",
+    "完整播报",
+    "马上补上",
+    "电台断线",
+    "先让声音不断",
+    "频道稳住",
+    "先留在这里",
+    "我先留住",
+    "换一段空气",
+    "这一小处",
+    "像人把门带上",
+    "旧车票",
+    "不是在讲同一件事",
+    "一句很小的心事",
+    "先让旋律把话说完",
+    "This is Claudio. 星期",
+    "时间停在杯子旁边"
   ];
   return banned.some((phrase) => normalized.includes(phrase));
 }
@@ -2268,7 +2278,11 @@ function quickAutoSegue(candidate, current, options = {}) {
 async function hydrateAutoSegue(candidate, current, options = {}) {
   const introRequestId = ++state.introRequestId;
   let intro = await withTimeout(buildAutoSegue(candidate, current, options), 18000);
-  if (!intro || introRequestId !== state.introRequestId || trackKey(state.reply?.play) !== trackKey(candidate)) return;
+  if (!intro || trackKey(state.reply?.play) !== trackKey(candidate)) return;
+  if (introRequestId !== state.introRequestId) {
+    const activeTrack = currentPlaybackTrack() ?? state.currentTrack;
+    if (trackKey(activeTrack) !== trackKey(candidate)) return;
+  }
   if (/\bThis is Claudio\b/i.test(intro) || isWeakOpeningIntro(intro) || isTemplateDjCopy(intro) || isRecentlyUsedDjShape(intro)) {
     const lines = await lyricPreviewLines(candidate);
     const anchor = pickAutoAnchorLine(lines, candidate.title);
